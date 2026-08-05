@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { MapPin, Navigation, MessageSquare, Heart, Gift as GiftIcon, Cake, Menu, X } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { MapPin, Navigation, MessageSquare, Heart, Gift as GiftIcon, Cake, Menu, X, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppContext } from '../lib/AppContext';
 import CountdownTimer from '../components/CountdownTimer';
@@ -7,7 +7,7 @@ import PaymentModal from '../components/PaymentModal';
 import { Gift } from '../types';
 
 export default function PublicPage() {
-  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery } = useAppContext();
+  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading } = useAppContext();
   
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
   
@@ -23,15 +23,36 @@ export default function PublicPage() {
 
   const isWedding = eventDetails.eventType === 'casamento';
 
-  const handleMessageSubmit = (e: React.FormEvent) => {
+  // Refs for carousels
+  const galleryRef = useRef<HTMLDivElement>(null);
+  const giftsRef = useRef<HTMLDivElement>(null);
+
+  const scrollCarousel = (ref: React.RefObject<HTMLDivElement>, direction: 'left' | 'right') => {
+    if (ref.current) {
+      const scrollAmount = ref.current.clientWidth * 0.8;
+      ref.current.scrollBy({ left: direction === 'left' ? -scrollAmount : scrollAmount, behavior: 'smooth' });
+      
+      // Simple infinite effect: if we scroll near the end, reset scroll position (hacky but works for pure CSS scroll)
+      setTimeout(() => {
+        if (!ref.current) return;
+        if (direction === 'right' && ref.current.scrollLeft >= ref.current.scrollWidth - ref.current.clientWidth - 10) {
+           ref.current.scrollTo({ left: ref.current.scrollWidth / 2, behavior: 'instant' });
+        } else if (direction === 'left' && ref.current.scrollLeft <= 10) {
+           ref.current.scrollTo({ left: ref.current.scrollWidth / 2, behavior: 'instant' });
+        }
+      }, 500);
+    }
+  };
+
+  const handleMessageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!msgName.trim() || !msgContent.trim()) return;
-    addMessage({ authorName: msgName, content: msgContent });
+    await addMessage({ authorName: msgName, content: msgContent });
     setMsgName('');
     setMsgContent('');
   };
 
-  const handleRsvpSubmit = (e: React.FormEvent) => {
+  const handleRsvpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const searchName = rsvpName.trim().toLowerCase();
     if (!searchName) return;
@@ -39,7 +60,7 @@ export default function PublicPage() {
     const guest = guests.find(g => g.name.toLowerCase() === searchName);
 
     if (guest) {
-      updateGuest(guest.id, { status: 'Confirmado' });
+      await updateGuest(guest.id, { status: 'Confirmado' });
       setRsvpStatus('success');
     } else {
       setRsvpStatus('not_found');
@@ -73,6 +94,15 @@ export default function PublicPage() {
     hidden: { opacity: 0, y: 30 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: 'easeOut' } }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+        <Loader2 className="w-12 h-12 text-teal-600 animate-spin mb-4" />
+        <p className="text-slate-600 font-medium">Carregando evento...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
@@ -190,10 +220,17 @@ export default function PublicPage() {
           <div className="max-w-6xl mx-auto overflow-hidden">
             <h2 className="text-3xl font-serif mb-12 text-center text-slate-800">Galeria de Fotos</h2>
             
-            <div className="overflow-hidden w-full py-4 relative group/carousel">
-              <div className="flex w-max animate-infinite-scroll gap-4">
-                {[...gallery, ...gallery, ...gallery, ...gallery].map((img, index) => (
-                  <div key={`${img.id}-${index}`} className="relative group rounded-xl overflow-hidden shadow-sm w-64 md:w-80 shrink-0">
+            <div className="relative group/carousel">
+              <button onClick={() => scrollCarousel(galleryRef, 'left')} className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/80 backdrop-blur rounded-full shadow-md text-slate-800 opacity-0 group-hover/carousel:opacity-100 transition-opacity disabled:opacity-0 hidden md:block">
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button onClick={() => scrollCarousel(galleryRef, 'right')} className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/80 backdrop-blur rounded-full shadow-md text-slate-800 opacity-0 group-hover/carousel:opacity-100 transition-opacity disabled:opacity-0 hidden md:block">
+                <ChevronRight className="w-6 h-6" />
+              </button>
+
+              <div ref={galleryRef} className="flex overflow-x-auto snap-x snap-mandatory gap-4 py-4 no-scrollbar scroll-smooth">
+                {[...gallery, ...gallery, ...gallery, ...gallery, ...gallery].map((img, index) => (
+                  <div key={`${img.id}-${index}`} className="relative group rounded-xl overflow-hidden shadow-sm w-64 md:w-80 shrink-0 snap-start">
                     <img src={img.url} alt={img.caption || 'Galeria'} className="w-full h-48 md:h-64 object-cover transition-transform duration-500 group-hover:scale-105" />
                     {img.caption && (
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
@@ -327,29 +364,44 @@ export default function PublicPage() {
               Nenhum presente cadastrado no momento.
             </div>
           ) : (
-            <div className="overflow-hidden w-full py-4 relative group/carousel">
-              <div className="flex w-max animate-infinite-scroll gap-6">
-                {[...gifts, ...gifts, ...gifts, ...gifts].map((gift, index) => (
-                  <div key={`${gift.id}-${index}`} className="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 flex flex-col transition-transform hover:-translate-y-1 duration-300 w-72 md:w-80 shrink-0">
+            <div className="relative group/carousel">
+              <button onClick={() => scrollCarousel(giftsRef, 'left')} className="absolute left-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/80 backdrop-blur rounded-full shadow-md text-slate-800 opacity-0 group-hover/carousel:opacity-100 transition-opacity disabled:opacity-0 hidden md:block">
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button onClick={() => scrollCarousel(giftsRef, 'right')} className="absolute right-2 top-1/2 -translate-y-1/2 z-10 p-2 bg-white/80 backdrop-blur rounded-full shadow-md text-slate-800 opacity-0 group-hover/carousel:opacity-100 transition-opacity disabled:opacity-0 hidden md:block">
+                <ChevronRight className="w-6 h-6" />
+              </button>
+
+              <div ref={giftsRef} className="flex overflow-x-auto snap-x snap-mandatory gap-6 py-4 no-scrollbar scroll-smooth">
+                {[...gifts, ...gifts, ...gifts, ...gifts, ...gifts].map((gift, index) => {
+                  const isDisabled = gift.quantity !== undefined && gift.quantity <= 0;
+                  return (
+                  <div key={`${gift.id}-${index}`} className={`bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 flex flex-col transition-transform hover:-translate-y-1 duration-300 w-72 md:w-80 shrink-0 snap-start ${isDisabled ? 'opacity-50 grayscale' : ''}`}>
                     <img src={gift.imageUrl} alt={gift.title} className="w-full h-48 object-cover" />
                     <div className="p-5 flex flex-col flex-1">
                       {gift.category && (
                         <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider mb-2">{gift.category}</span>
                       )}
-                      <h3 className="font-semibold text-lg text-slate-800 mb-2">{gift.title}</h3>
+                      <h3 className="font-semibold text-lg text-slate-800 mb-2">
+                        {gift.title}
+                        {gift.quantity !== undefined && (
+                           <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {gift.quantity}</span>
+                        )}
+                      </h3>
                       <p className="text-slate-500 text-sm mb-4 flex-1 line-clamp-2">{gift.description}</p>
                       <div className="flex items-center justify-between mt-auto">
                         <span className="font-medium text-teal-700">R$ {gift.price.toFixed(2)}</span>
                         <button 
+                          disabled={isDisabled}
                           onClick={() => setSelectedGift(gift)}
-                          className="bg-teal-50 text-teal-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-teal-100 transition-colors"
+                          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${isDisabled ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'}`}
                         >
-                          Presentear
+                          {isDisabled ? 'Esgotado' : 'Presentear'}
                         </button>
                       </div>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             </div>
           )}

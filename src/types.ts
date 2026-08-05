@@ -27,6 +27,7 @@ export type Gift = {
   price: number;
   imageUrl: string;
   category?: string;
+  quantity?: number;
 };
 
 export type Message = {
@@ -59,6 +60,7 @@ export type PaymentSettings = {
   city: string;
   gatewayProvider: 'stripe' | 'mercadopago' | 'asaas' | 'simulated';
   gatewayPublicKey: string;
+  gatewayAccessToken?: string;
   gatewayEnvironment: 'sandbox' | 'production';
   gatewayWebhookUrl?: string;
 };
@@ -71,6 +73,13 @@ export type LocationDetails = {
   mapsLink: string;
   latitude: string;
   longitude: string;
+};
+
+export type Host = {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
 };
 
 export type EventDetails = {

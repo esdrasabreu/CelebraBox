@@ -107,8 +107,8 @@ export const initialPaymentSettings: PaymentSettings = {
   pixKey: 'contato@exemplo.com',
   receiverName: 'João da Silva',
   city: 'São Paulo',
-  gatewayProvider: 'simulated',
-  gatewayPublicKey: '',
+  gatewayProvider: 'mercadopago',
+  gatewayPublicKey: 'APP_USR-e3868214-9c52-4001-bd10-ea0046f39930',
   gatewayEnvironment: 'sandbox',
   gatewayWebhookUrl: ''
 };

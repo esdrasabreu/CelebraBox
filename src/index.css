@@ -12,15 +12,12 @@
     border-radius: 20px;
   }
   
-  .animate-infinite-scroll {
-    animation: infinite-scroll 45s linear infinite;
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
-  .animate-infinite-scroll:hover {
-    animation-play-state: paused;
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 
-@keyframes infinite-scroll {
-  from { transform: translateX(0); }
-  to { transform: translateX(calc(-50% - 0.5rem)); } /* -50% shifts halfway, adjusted for gap */
-}

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt } from 'lucide-react';
 import { useAppContext } from '../lib/AppContext';
+import { useAuth } from '../lib/AuthContext';
 import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
 
 export default function AdminDashboard() {
+  const { host, logout } = useAuth();
   const { 
     eventDetails, setEventDetails,
     paymentSettings, setPaymentSettings,
@@ -28,7 +30,7 @@ export default function AdminDashboard() {
   const [isEditingGuest, setIsEditingGuest] = useState(false);
 
   // GIFTS STATE
-  const [giftForm, setGiftForm] = useState({ id: '', title: '', description: '', price: '', imageUrl: '', category: '' });
+  const [giftForm, setGiftForm] = useState({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' });
   const [isEditingGift, setIsEditingGift] = useState(false);
 
   // GALLERY STATE
@@ -67,6 +69,7 @@ export default function AdminDashboard() {
     city: paymentSettings.city,
     gatewayProvider: paymentSettings.gatewayProvider,
     gatewayPublicKey: paymentSettings.gatewayPublicKey,
+    gatewayAccessToken: paymentSettings.gatewayAccessToken || '',
     gatewayEnvironment: paymentSettings.gatewayEnvironment,
     gatewayWebhookUrl: paymentSettings.gatewayWebhookUrl || '',
   });
@@ -113,7 +116,8 @@ export default function AdminDashboard() {
       description: giftForm.description,
       price: parseFloat(giftForm.price),
       imageUrl: giftForm.imageUrl,
-      category: giftForm.category || undefined
+      category: giftForm.category || undefined,
+      quantity: giftForm.quantity ? parseInt(giftForm.quantity) : undefined
     };
 
     if (isEditingGift) {
@@ -122,12 +126,12 @@ export default function AdminDashboard() {
       addGift(payload);
     }
     
-    setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '' });
+    setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' });
     setIsEditingGift(false);
   };
 
   const handleEditGift = (g: GiftType) => {
-    setGiftForm({ id: g.id, title: g.title, description: g.description, price: g.price.toString(), imageUrl: g.imageUrl, category: g.category || '' });
+    setGiftForm({ id: g.id, title: g.title, description: g.description, price: g.price.toString(), imageUrl: g.imageUrl, category: g.category || '', quantity: g.quantity?.toString() || '' });
     setIsEditingGift(true);
   };
 
@@ -188,9 +192,9 @@ export default function AdminDashboard() {
     setIsEditingExpense(true);
   };
 
-  const handleSettingsSave = (e: React.FormEvent) => {
+  const handleSettingsSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setEventDetails({
+    await setEventDetails({
       ...eventDetails,
       eventType: settingsForm.eventType,
       title: settingsForm.title,
@@ -210,9 +214,9 @@ export default function AdminDashboard() {
     alert('Configurações salvas com sucesso!');
   };
 
-  const handlePaymentSave = (e: React.FormEvent) => {
+  const handlePaymentSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setPaymentSettings({
+    const newSettings = {
       ...paymentSettings,
       pixKeyType: paymentForm.pixKeyType as any,
       pixKey: paymentForm.pixKey,
@@ -220,9 +224,12 @@ export default function AdminDashboard() {
       city: paymentForm.city,
       gatewayProvider: paymentForm.gatewayProvider as any,
       gatewayPublicKey: paymentForm.gatewayPublicKey,
+      gatewayAccessToken: paymentForm.gatewayAccessToken,
       gatewayEnvironment: paymentForm.gatewayEnvironment as any,
       gatewayWebhookUrl: paymentForm.gatewayWebhookUrl,
-    });
+    };
+    
+    await setPaymentSettings(newSettings);
     alert('Configurações de pagamento salvas com sucesso!');
   };
 
@@ -275,10 +282,17 @@ export default function AdminDashboard() {
         </nav>
 
         <div className="p-4 border-t border-slate-800 mt-auto">
-          <a href="/" className="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
-            <LogOut className="w-5 h-5" />
-            <span className="font-medium">Ver Site Público</span>
+          <div className="mb-2 text-xs text-slate-500 px-4">
+            Logado como: <span className="text-slate-300 font-medium">{host?.name}</span>
+          </div>
+          <a href={`/e/${host?.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+            <LayoutDashboard className="w-4 h-4" />
+            <span className="font-medium text-sm">Ver Site Público</span>
           </a>
+          <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors mt-1">
+            <LogOut className="w-4 h-4" />
+            <span className="font-medium text-sm">Sair</span>
+          </button>
         </div>
       </aside>
 
@@ -655,10 +669,14 @@ export default function AdminDashboard() {
                   <label className="block text-xs font-medium text-slate-500 mb-1">Categoria (Opcional)</label>
                   <input type="text" value={giftForm.category} onChange={e => setGiftForm({...giftForm, category: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Viagem, Casa" />
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Quantidade (Opcional)</label>
+                  <input type="number" min="1" value={giftForm.quantity} onChange={e => setGiftForm({...giftForm, quantity: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: 5" />
+                </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 {isEditingGift && (
-                  <button type="button" onClick={() => { setIsEditingGift(false); setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '' }) }} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">Cancelar</button>
+                  <button type="button" onClick={() => { setIsEditingGift(false); setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' }) }} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">Cancelar</button>
                 )}
                 <button type="submit" className="px-6 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 shadow-sm">
                   {isEditingGift ? 'Salvar Alterações' : 'Criar Presente'}
@@ -674,7 +692,7 @@ export default function AdminDashboard() {
                   <img src={g.imageUrl} alt={g.title} className="w-full h-32 object-cover" />
                   <div className="p-4 flex flex-col flex-1">
                     {g.category && <span className="text-xs text-teal-600 font-semibold uppercase mb-1">{g.category}</span>}
-                    <h4 className="font-semibold text-slate-800">{g.title}</h4>
+                    <h4 className="font-semibold text-slate-800">{g.title} {g.quantity !== undefined ? <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {g.quantity}</span> : null}</h4>
                     <p className="text-sm text-slate-500 truncate mb-2">{g.description}</p>
                     <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-100">
                       <span className="font-bold text-slate-700">R$ {g.price.toFixed(2)}</span>
@@ -838,16 +856,28 @@ export default function AdminDashboard() {
                   </div>
                   
                   {paymentForm.gatewayProvider !== 'simulated' && (
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">Chave Pública (Public Key)</label>
-                      <input 
-                        type="text" 
-                        value={paymentForm.gatewayPublicKey}
-                        onChange={e => setPaymentForm({...paymentForm, gatewayPublicKey: e.target.value})}
-                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono text-sm" 
-                        placeholder="pk_test_..."
-                      />
-                    </div>
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Chave Pública (Public Key)</label>
+                        <input 
+                          type="text" 
+                          value={paymentForm.gatewayPublicKey}
+                          onChange={e => setPaymentForm({...paymentForm, gatewayPublicKey: e.target.value})}
+                          className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono text-sm" 
+                          placeholder="pk_test_..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Access Token (Token de Acesso)</label>
+                        <input 
+                          type="password" 
+                          value={paymentForm.gatewayAccessToken}
+                          onChange={e => setPaymentForm({...paymentForm, gatewayAccessToken: e.target.value})}
+                          className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono text-sm" 
+                          placeholder="APP_USR-..."
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 mt-2">
