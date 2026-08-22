@@ -98,7 +98,7 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
         }, 1500);
       }
     } catch (err) {
-      console.error(err);
+      console.warn("Payment error:", err);
       setErrorMsg('Ocorreu um erro ao processar. Tente novamente.');
       setIsProcessing(false);
     }

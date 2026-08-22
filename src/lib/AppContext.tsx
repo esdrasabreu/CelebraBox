@@ -204,7 +204,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         }
         
       } catch (err) {
-        console.error("Error fetching from Supabase", err);
+        console.warn("Error fetching from Supabase", err);
       } finally {
         setIsLoading(false);
       }

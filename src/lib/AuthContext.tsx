@@ -19,52 +19,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const checkSession = async () => {
       if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          const { data } = await supabase
-            .from('hosts')
-            .select('*')
-            .eq('id', session.user.id)
-            .single();
-            
-          if (data) {
-            setHost({ id: data.id, name: data.name, email: data.email, passwordHash: '' });
-          } else {
-            const { data: newHost } = await supabase
-              .from('hosts')
-              .insert([{ 
-                id: session.user.id, 
-                name: session.user.user_metadata?.name || 'User', 
-                email: session.user.email 
-              }])
-              .select()
-              .single();
-              
-            if (newHost) {
-              setHost({ id: newHost.id, name: newHost.name, email: newHost.email, passwordHash: '' });
-            }
-          }
-        }
-        
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === 'SIGNED_OUT') {
-            setHost(null);
-          } else if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
-            const { data } = await supabase
+        try {
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError) {
+            console.warn("Supabase session error:", sessionError);
+          } else if (session?.user) {
+            const { data, error } = await supabase
               .from('hosts')
               .select('*')
               .eq('id', session.user.id)
               .single();
               
-            if (data) {
+            if (data && !error) {
               setHost({ id: data.id, name: data.name, email: data.email, passwordHash: '' });
+            } else if (error && error.code === 'PGRST116') {
+              // Not found, create it
+              const { data: newHost, error: insertError } = await supabase
+                .from('hosts')
+                .insert([{ 
+                  id: session.user.id, 
+                  name: session.user.user_metadata?.name || 'User', 
+                  email: session.user.email 
+                }])
+                .select()
+                .single();
+                
+              if (newHost && !insertError) {
+                setHost({ id: newHost.id, name: newHost.name, email: newHost.email, passwordHash: '' });
+              }
             }
           }
-        });
+        } catch (err) {
+          console.warn("Error checking Supabase session:", err);
+        }
         
-        setIsLoading(false);
-        return () => subscription.unsubscribe();
+        try {
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_OUT') {
+              setHost(null);
+            } else if (session?.user && (event === 'SIGNED_IN' || event === 'USER_UPDATED')) {
+              const { data } = await supabase
+                .from('hosts')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
+                
+              if (data) {
+                setHost({ id: data.id, name: data.name, email: data.email, passwordHash: '' });
+              }
+            }
+          });
+          
+          setIsLoading(false);
+          // We can't easily return the cleanup from here, but this is a global listener anyway
+        } catch (err) {
+          console.warn("Error setting up auth listener:", err);
+          setIsLoading(false);
+        }
       } else {
         const savedHost = localStorage.getItem('wedding_tech_current_host');
         if (savedHost) {
@@ -89,13 +101,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, passwordHash: string) => {
     if (supabase) {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: passwordHash,
-      });
-        
-      if (data?.user && !error) {
-        return true;
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: passwordHash,
+        });
+          
+        if (data?.user && !error) {
+          return true;
+        }
+      } catch (err) {
+        console.warn("Supabase login error:", err);
       }
       return false;
     }
@@ -113,29 +129,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (name: string, email: string, passwordHash: string) => {
     if (supabase) {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: passwordHash,
-        options: {
-          data: { name }
-        }
-      });
-        
-      if (data?.user && !error) {
-        const { error: insertError } = await supabase
-          .from('hosts')
-          .insert([{ 
-            id: data.user.id,
-            name, 
-            email 
-          }]);
+      try {
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password: passwordHash,
+          options: {
+            data: { name }
+          }
+        });
           
-        if (insertError) {
-          console.error("Failed to create host profile", insertError);
+        if (data?.user && !error) {
+          const { error: insertError } = await supabase
+            .from('hosts')
+            .insert([{ 
+              id: data.user.id,
+              name, 
+              email 
+            }]);
+            
+          if (insertError) {
+            console.warn("Failed to create host profile", insertError);
+          }
+          return true;
         }
-        return true;
+        console.warn(error);
+      } catch (err) {
+        console.warn("Supabase register error:", err);
       }
-      console.error(error);
       return false;
     }
 
@@ -161,7 +181,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     if (supabase) {
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("Supabase logout error:", err);
+      }
     }
     setHost(null);
   };
