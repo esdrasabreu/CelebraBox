@@ -1,13 +1,14 @@
 import React, { useState, useRef } from 'react';
 import { MapPin, Navigation, MessageSquare, Heart, Gift as GiftIcon, Cake, Menu, X, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
+import { useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../lib/AppContext';
 import CountdownTimer from '../components/CountdownTimer';
 import PaymentModal from '../components/PaymentModal';
 import { Gift } from '../types';
 
 export default function PublicPage() {
-  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading } = useAppContext();
+  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading, isNotFound } = useAppContext();
   
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
   
@@ -16,10 +17,13 @@ export default function PublicPage() {
   const [msgContent, setMsgContent] = useState('');
 
   // RSVP Form State
-  const [rsvpName, setRsvpName] = useState('');
+  const [searchParams] = useSearchParams();
+  const initialCode = searchParams.get('code') || '';
+  const [rsvpName, setRsvpName] = useState(initialCode);
   const [rsvpStatus, setRsvpStatus] = useState<'idle' | 'success' | 'not_found'>('idle');
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const shouldReduceMotion = useReducedMotion();
 
   const isWedding = eventDetails.eventType === 'casamento';
 
@@ -54,10 +58,31 @@ export default function PublicPage() {
 
   const handleRsvpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const searchName = rsvpName.trim().toLowerCase();
-    if (!searchName) return;
-
-    const guest = guests.find(g => g.name.toLowerCase() === searchName);
+    const searchInput = rsvpName.trim();
+    if (!searchInput) return;
+    
+    // First try by confirmation code (case insensitive)
+    let guest = guests.find(g => g.confirmationCode?.toLowerCase() === searchInput.toLowerCase());
+    
+    // If not found by code, try by normalized name
+    if (!guest) {
+      const normalizeStr = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+      const searchName = normalizeStr(searchInput);
+      
+      // Exact match after normalization
+      guest = guests.find(g => normalizeStr(g.name) === searchName);
+      
+      // If still not found, try partial match (suggestions logic could be complex, let's just do partial match for simplicity, or we show suggestions)
+      if (!guest) {
+         const possibleMatches = guests.filter(g => normalizeStr(g.name).includes(searchName) || searchName.includes(normalizeStr(g.name)));
+         if (possibleMatches.length === 1) {
+             guest = possibleMatches[0];
+         } else if (possibleMatches.length > 1) {
+             // Let's just say not found for now to prevent confirming wrong person if ambiguous
+             setRsvpStatus('not_found');
+         }
+      }
+    }
 
     if (guest) {
       await updateGuest(guest.id, { status: 'Confirmado' });
@@ -91,15 +116,95 @@ export default function PublicPage() {
   ];
 
   const fadeUpVariant = {
-    hidden: { opacity: 0, y: 30 },
+    hidden: { opacity: 0, y: shouldReduceMotion ? 0 : 30 },
     visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: 'easeOut' } }
   };
+
+  
+  useEffect(() => {
+    if (eventDetails.title) {
+      document.title = `${eventDetails.title} | CelebraBox`;
+      
+      const setMeta = (name, content, isProperty = false) => {
+        const attr = isProperty ? 'property' : 'name';
+        let el = document.querySelector(`meta[${attr}="${name}"]`);
+        if (!el) {
+          el = document.createElement('meta');
+          el.setAttribute(attr, name);
+          document.head.appendChild(el);
+        }
+        el.setAttribute('content', content);
+      };
+      
+      const desc = eventDetails.story ? eventDetails.story.substring(0, 150) + '...' : 'Venha celebrar conosco!';
+      
+      setMeta('description', desc);
+      setMeta('og:title', eventDetails.title, true);
+      setMeta('og:description', desc, true);
+      setMeta('og:image', eventDetails.coverImage, true);
+      setMeta('twitter:card', 'summary_large_image');
+      setMeta('twitter:title', eventDetails.title);
+      setMeta('twitter:description', desc);
+      setMeta('twitter:image', eventDetails.coverImage);
+      
+      // JSON-LD
+      let script = document.querySelector('#jsonld-event');
+      if (!script) {
+        script = document.createElement('script');
+        script.id = 'jsonld-event';
+        script.type = 'application/ld+json';
+        document.head.appendChild(script);
+      }
+      
+      const jsonLd = {
+        "@context": "https://schema.org",
+        "@type": "Event",
+        "name": eventDetails.title,
+        "description": desc,
+        "startDate": eventDetails.date,
+        "location": {
+          "@type": "Place",
+          "name": eventDetails.location.name,
+          "address": {
+            "@type": "PostalAddress",
+            "streetAddress": eventDetails.location.address,
+            "addressLocality": eventDetails.location.city,
+            "addressRegion": eventDetails.location.state
+          }
+        },
+        "image": eventDetails.coverImage,
+        "url": window.location.href
+      };
+      script.textContent = JSON.stringify(jsonLd);
+    }
+  }, [eventDetails]);
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
         <Loader2 className="w-12 h-12 text-teal-600 animate-spin mb-4" />
         <p className="text-slate-600 font-medium">Carregando evento...</p>
+      </div>
+    );
+  }
+
+  if (isNotFound) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
+        <h1 className="text-4xl font-serif text-slate-800 mb-4">Evento não encontrado</h1>
+        <p className="text-lg text-slate-600 mb-8 max-w-md">Não conseguimos encontrar a página deste evento. Verifique se o link está correto.</p>
+        <a href="/" className="px-8 py-3 bg-teal-600 text-white font-medium rounded-full shadow-lg hover:bg-teal-700 transition-colors hover:-translate-y-1">
+          Crie seu próprio site de evento
+        </a>
+      </div>
+    );
+  }
+
+  if (!eventDetails.title) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
+        <h1 className="text-3xl font-serif text-slate-800 mb-4">Página em construção</h1>
+        <p className="text-lg text-slate-600 max-w-md">O anfitrião ainda está configurando os detalhes deste evento. Volte em breve!</p>
       </div>
     );
   }
@@ -159,11 +264,20 @@ export default function PublicPage() {
       {/* Hero Section */}
       <section id="home" className="relative h-screen min-h-[600px] flex items-center justify-center overflow-hidden pt-16">
         <div className="absolute inset-0 z-0">
-          <img 
-            src={eventDetails.coverImage} 
-            alt="Hero cover" 
-            className="w-full h-full object-cover object-center"
-          />
+          {eventDetails.coverMediaType === 'video' && eventDetails.coverVideoUrl ? (
+            <video 
+              src={eventDetails.coverVideoUrl} 
+              poster={eventDetails.coverImage}
+              className="w-full h-full object-cover object-center"
+              autoPlay muted loop playsInline
+            />
+          ) : (
+            <img 
+              src={eventDetails.coverImage} 
+              alt="Hero cover" 
+              className="w-full h-full object-cover object-center"
+            />
+          )}
           <div className="absolute inset-0 bg-black/40 mix-blend-multiply" />
         </div>
         
@@ -306,19 +420,19 @@ export default function PublicPage() {
         <div className="max-w-lg mx-auto">
           <div className="text-center mb-10">
             <h2 className="text-3xl font-serif mb-4 text-slate-800">Confirme sua Presença</h2>
-            <p className="text-slate-600">Por favor, digite seu nome completo abaixo para confirmar.</p>
+            <p className="text-slate-600">Por favor, digite seu nome completo ou código de confirmação abaixo para confirmar.</p>
           </div>
 
           <form onSubmit={handleRsvpSubmit} className="bg-slate-50 p-6 md:p-8 rounded-2xl shadow-sm border border-slate-100">
             <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nome Completo</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Nome ou Código de Confirmação</label>
               <input 
                 type="text" 
                 required 
                 value={rsvpName} 
                 onChange={e => setRsvpName(e.target.value)} 
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                placeholder="Ex: João da Silva" 
+                placeholder="Ex: João da Silva ou ABC123" 
               />
             </div>
             

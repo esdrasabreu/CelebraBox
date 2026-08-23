@@ -1,3 +1,16 @@
+-- Remove latitude/longitude from event_details
+ALTER TABLE event_details DROP COLUMN IF EXISTS location_latitude;
+ALTER TABLE event_details DROP COLUMN IF EXISTS location_longitude;
+
+-- Add slug to event_details
+ALTER TABLE event_details ADD COLUMN IF NOT EXISTS slug TEXT UNIQUE;
+
+-- Add cover_media_type and cover_video_url to event_details
+ALTER TABLE event_details ADD COLUMN IF NOT EXISTS cover_media_type TEXT DEFAULT 'image';
+ALTER TABLE event_details ADD COLUMN IF NOT EXISTS cover_video_url TEXT;
+
+-- Add confirmation_code to guests
+ALTER TABLE guests ADD COLUMN IF NOT EXISTS confirmation_code TEXT UNIQUE;
 -- Run this in your Supabase SQL Editor
 
 CREATE TABLE IF NOT EXISTS hosts (
@@ -20,12 +33,11 @@ CREATE TABLE IF NOT EXISTS event_details (
   location_city TEXT,
   location_state TEXT,
   location_maps_link TEXT,
+  location_latitude TEXT,
+  location_longitude TEXT,
   story TEXT,
   cover_image TEXT,
-  cover_media_type TEXT DEFAULT 'image',
-  cover_video_url TEXT,
-  theme_color TEXT,
-  slug TEXT UNIQUE
+  theme_color TEXT
 );
 
 ALTER TABLE event_details ENABLE ROW LEVEL SECURITY;
@@ -72,8 +84,7 @@ CREATE TABLE IF NOT EXISTS guests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   host_id UUID REFERENCES hosts(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  status TEXT NOT NULL,
-  confirmation_code TEXT UNIQUE
+  status TEXT NOT NULL
 );
 
 ALTER TABLE guests ENABLE ROW LEVEL SECURITY;

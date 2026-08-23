@@ -7,6 +7,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
 import PaymentStatus from './pages/PaymentStatus';
 import { Loader2 } from 'lucide-react';
+import { Toaster } from 'sonner';
 
 function AdminWrapper() {
   const { host, isLoading } = useAuth();
@@ -54,6 +55,7 @@ function PublicWrapper() {
 export default function App() {
   return (
     <AuthProvider>
+      <Toaster position="top-center" richColors />
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginWrapper />} />

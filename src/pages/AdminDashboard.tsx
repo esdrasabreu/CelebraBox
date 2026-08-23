@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { toast } from 'sonner';
 import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt } from 'lucide-react';
 import { useAppContext } from '../lib/AppContext';
 import { useAuth } from '../lib/AuthContext';
@@ -45,6 +46,13 @@ export default function AdminDashboard() {
   const [expenseForm, setExpenseForm] = useState({ id: '', title: '', amount: '', date: '', status: 'Pendente' as ExpenseItem['status'] });
   const [isEditingExpense, setIsEditingExpense] = useState(false);
 
+  // SETTINGS WIZARD STATE
+  const [settingsStep, setSettingsStep] = useState(1);
+  const [showAdvancedAddress, setShowAdvancedAddress] = useState(false);
+  const [isSlugManual, setIsSlugManual] = useState(false);
+  const [showManualSlug, setShowManualSlug] = useState(false);
+  const [showAdvancedMaps, setShowAdvancedMaps] = useState(false);
+
   // SETTINGS STATE
   const [settingsForm, setSettingsForm] = useState({
     eventType: eventDetails.eventType,
@@ -55,8 +63,9 @@ export default function AdminDashboard() {
     locationCity: eventDetails.location.city,
     locationState: eventDetails.location.state,
     locationMapsLink: eventDetails.location.mapsLink,
-    locationLat: eventDetails.location.latitude,
-    locationLng: eventDetails.location.longitude,
+    slug: eventDetails.slug || '',
+    coverMediaType: eventDetails.coverMediaType || 'image',
+    coverVideoUrl: eventDetails.coverVideoUrl || '',
     story: eventDetails.story,
     coverImage: eventDetails.coverImage,
   });
@@ -84,8 +93,9 @@ export default function AdminDashboard() {
       locationCity: eventDetails.location.city,
       locationState: eventDetails.location.state,
       locationMapsLink: eventDetails.location.mapsLink,
-      locationLat: eventDetails.location.latitude,
-      locationLng: eventDetails.location.longitude,
+      slug: eventDetails.slug || '',
+    coverMediaType: eventDetails.coverMediaType || 'image',
+    coverVideoUrl: eventDetails.coverVideoUrl || '',
       story: eventDetails.story,
       coverImage: eventDetails.coverImage,
     });
@@ -223,27 +233,33 @@ export default function AdminDashboard() {
     setIsEditingExpense(true);
   };
 
-  const handleSettingsSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSettingsSave = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     console.log("Saving settings...");
-    await setEventDetails({
+    const updatedDetails = {
       ...eventDetails,
       eventType: settingsForm.eventType,
       title: settingsForm.title,
       date: settingsForm.date,
+      slug: settingsForm.slug,
+      coverMediaType: settingsForm.coverMediaType,
+      coverVideoUrl: settingsForm.coverVideoUrl,
       location: {
         name: settingsForm.locationName,
         address: settingsForm.locationAddress,
         city: settingsForm.locationCity,
         state: settingsForm.locationState,
         mapsLink: settingsForm.locationMapsLink,
-        latitude: settingsForm.locationLat,
-        longitude: settingsForm.locationLng,
       },
       story: settingsForm.story,
       coverImage: settingsForm.coverImage,
-    });
-    try { await setEventDetails({ ...eventDetails, eventType: settingsForm.eventType, title: settingsForm.title, date: settingsForm.date, location: { name: settingsForm.locationName, address: settingsForm.locationAddress, city: settingsForm.locationCity, state: settingsForm.locationState, mapsLink: settingsForm.locationMapsLink, latitude: settingsForm.locationLat, longitude: settingsForm.locationLng }, story: settingsForm.story, coverImage: settingsForm.coverImage }); alert('Configurações salvas com sucesso!'); } catch(err) { alert('Erro: ' + err); }
+    };
+    try { 
+      await setEventDetails(updatedDetails); 
+      toast.success('Configurações salvas com sucesso!'); 
+    } catch(err) { 
+      toast.error('Erro: ' + err); 
+    }
   };
 
   const handlePaymentSave = async (e: React.FormEvent) => {
@@ -262,7 +278,7 @@ export default function AdminDashboard() {
     };
     
     await setPaymentSettings(newSettings);
-    alert('Configurações de pagamento salvas com sucesso!');
+    toast.success('Configurações de pagamento salvas com sucesso!');
   };
 
   return (
@@ -317,7 +333,7 @@ export default function AdminDashboard() {
           <div className="mb-2 text-xs text-slate-500 px-4">
             Logado como: <span className="text-slate-300 font-medium">{host?.name}</span>
           </div>
-          <a href={`/e/${host?.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+          <a href={`/e/${eventDetails.slug || host?.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
             <LayoutDashboard className="w-4 h-4" />
             <span className="font-medium text-sm">Ver Site Público</span>
           </a>
@@ -458,7 +474,7 @@ export default function AdminDashboard() {
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => handleEditGallery(img)} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-teal-50 hover:text-teal-600"><Edit className="w-4 h-4" /></button>
-                      <button onClick={() => deleteGalleryImage(img.id)} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-red-50 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteGalleryImage(img.id) } }) }} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-red-50 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     </div>
                     {img.caption && <p className="text-white text-xs truncate drop-shadow-md">{img.caption}</p>}
                   </div>
@@ -514,7 +530,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <button onClick={() => handleEditSchedule(item)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
-                        <button onClick={() => deleteScheduleItem(item.id)} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteScheduleItem(item.id) } }) }} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
                       </td>
                     </tr>
                   ))}
@@ -647,7 +663,12 @@ export default function AdminDashboard() {
                       <tr><td colSpan={3} className="px-6 py-8 text-center text-slate-500">Nenhum convidado cadastrado.</td></tr>
                     ) : guests.map(guest => (
                       <tr key={guest.id} className="hover:bg-slate-50">
-                        <td className="px-6 py-4 font-medium text-slate-800">{guest.name}</td>
+                        <td className="px-6 py-4 font-medium text-slate-800">
+    {guest.name}
+    {guest.confirmationCode && (
+      <div className="text-xs text-slate-400 mt-1">Código: {guest.confirmationCode}</div>
+    )}
+  </td>
                         <td className="px-6 py-4">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                             guest.status === 'Confirmado' ? 'bg-green-100 text-green-800' : 
@@ -657,8 +678,14 @@ export default function AdminDashboard() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button onClick={() => handleEditGuest(guest)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
-                          <button onClick={() => deleteGuest(guest.id)} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={() => {
+    const slugOrId = eventDetails.slug || host?.id;
+    const url = `${window.location.origin}/e/${slugOrId}?code=${guest.confirmationCode || ''}#rsvp`;
+    navigator.clipboard.writeText(url);
+    toast.success('Link copiado!');
+  }} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1" title="Copiar Link RSVP"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>
+  <button onClick={() => handleEditGuest(guest)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
+                          <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteGuest(guest.id) } }) }} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
                         </td>
                       </tr>
                     ))}
@@ -932,145 +959,324 @@ export default function AdminDashboard() {
               <p className="text-slate-500 text-sm">Altere as informações públicas do seu evento.</p>
             </div>
 
-            <form onSubmit={handleSettingsSave} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
-              
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Evento</label>
-                  <select 
-                    value={settingsForm.eventType}
-                    onChange={e => setSettingsForm({...settingsForm, eventType: e.target.value as 'casamento' | 'aniversário'})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              {/* Stepper */}
+              <div className="bg-slate-50 border-b border-slate-200 p-4">
+                <div className="flex items-center justify-between max-w-md mx-auto relative">
+                  <div className="absolute left-0 top-1/2 w-full h-0.5 bg-slate-200 -z-10 -translate-y-1/2" />
+                  <div className="absolute left-0 top-1/2 h-0.5 bg-teal-600 -z-10 -translate-y-1/2 transition-all duration-300" style={{ width: settingsStep === 1 ? '0%' : settingsStep === 2 ? '50%' : '100%' }} />
+                  {[1, 2, 3].map((step) => (
+                    <button 
+                      key={step} 
+                      type="button"
+                      onClick={() => setSettingsStep(step)}
+                      className={`flex flex-col items-center gap-1 bg-slate-50 px-2 cursor-pointer focus:outline-none ${settingsStep >= step ? 'text-teal-600' : 'text-slate-400'}`}
+                    >
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-medium border-2 transition-colors ${settingsStep >= step ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-slate-300 hover:border-teal-400 hover:text-teal-500'}`}>
+                        {step}
+                      </div>
+                      <span className={`text-xs font-medium hidden sm:block transition-colors ${settingsStep >= step ? 'text-teal-600' : 'hover:text-teal-500'}`}>
+                        {step === 1 ? 'Evento' : step === 2 ? 'Local' : 'Aparência'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-center mt-2 sm:hidden text-sm font-medium text-slate-700">
+                  Etapa {settingsStep} de 3 — {settingsStep === 1 ? 'Informações do evento' : settingsStep === 2 ? 'Local do evento' : 'Aparência e Conteúdo'}
+                </div>
+              </div>
+
+              <form onSubmit={handleSettingsSave} className="p-6">
+                {settingsStep === 1 && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Evento</label>
+                        <select 
+                          value={settingsForm.eventType}
+                          onChange={e => setSettingsForm({...settingsForm, eventType: e.target.value as 'casamento' | 'aniversário'})}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
+                        >
+                          <option value="casamento">Casamento</option>
+                          <option value="aniversário">Aniversário</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Título do Evento</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={settingsForm.title}
+                          onChange={e => {
+                            const newTitle = e.target.value;
+                            if (!isSlugManual) {
+                              setSettingsForm({...settingsForm, title: newTitle, slug: newTitle.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, '-')});
+                            } else {
+                              setSettingsForm({...settingsForm, title: newTitle});
+                            }
+                          }}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                          placeholder={`Ex: ${settingsForm.eventType === 'casamento' ? 'Casamento de João e Maria' : 'Aniversário de Giullia'}`}
+                        />
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="overflow-hidden">
+                            <span className="block text-sm text-slate-500 mb-1">URL da página</span>
+                            <span className="text-sm font-medium text-slate-900 truncate block">
+                              /e/{settingsForm.slug || 'seu-evento'}
+                            </span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => setShowManualSlug(!showManualSlug)} 
+                            className="text-sm text-teal-600 font-medium hover:text-teal-700 whitespace-nowrap self-start sm:self-auto"
+                          >
+                            {showManualSlug ? 'Ocultar' : 'Editar URL'}
+                          </button>
+                        </div>
+                        
+                        {showManualSlug && (
+                          <div className="mt-4 pt-4 border-t border-slate-200">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Personalizar URL (Slug)</label>
+                            <div className="flex">
+                              <span className="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-slate-300 bg-slate-100 text-slate-500 sm:text-sm">
+                                /e/
+                              </span>
+                              <input 
+                                type="text" 
+                                value={settingsForm.slug} 
+                                onChange={e => {
+                                  setIsSlugManual(true);
+                                  setSettingsForm({...settingsForm, slug: e.target.value.replace(/[^a-z0-9-]/gi, '-').toLowerCase()})
+                                }} 
+                                className="flex-1 px-4 py-2 border border-slate-300 rounded-none rounded-r-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                                placeholder="meu-evento" 
+                              />
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">Apenas letras, números e hifens.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">Data e Hora do Evento</label>
+                        <input 
+                          type="datetime-local" 
+                          required
+                          value={settingsForm.date ? settingsForm.date.slice(0, 16) : ''}
+                          onChange={e => setSettingsForm({...settingsForm, date: new Date(e.target.value).toISOString()})}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {settingsStep === 2 && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Onde será o evento?</label>
+                      <input 
+                        type="text" 
+                        value={settingsForm.locationName}
+                        onChange={e => {
+                          setSettingsForm({...settingsForm, locationName: e.target.value, locationMapsLink: ''});
+                        }}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                        placeholder="Digite o nome do local ou endereço"
+                      />
+                      <p className="text-xs text-slate-500 mt-2">Ex.: Salão Jardim, Igreja Central ou Rua Almerim, 115</p>
+                    </div>
+
+                    {!showAdvancedAddress && (
+                      <button 
+                        type="button" 
+                        onClick={() => setShowAdvancedAddress(true)}
+                        className="text-sm font-medium text-teal-600 flex items-center gap-1 hover:text-teal-700"
+                      >
+                        <Plus className="w-4 h-4" /> Adicionar detalhes do endereço
+                      </button>
+                    )}
+
+                    {showAdvancedAddress && (
+                      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-1">Endereço / Rua (e Número)</label>
+                          <input 
+                            type="text" 
+                            value={settingsForm.locationAddress}
+                            onChange={e => setSettingsForm({...settingsForm, locationAddress: e.target.value})}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                          />
+                        </div>
+                        <div className="grid sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Cidade</label>
+                            <input 
+                              type="text" 
+                              value={settingsForm.locationCity}
+                              onChange={e => setSettingsForm({...settingsForm, locationCity: e.target.value})}
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Estado (UF)</label>
+                            <input 
+                              type="text" 
+                              maxLength={2}
+                              value={settingsForm.locationState}
+                              onChange={e => setSettingsForm({...settingsForm, locationState: e.target.value.toUpperCase()})}
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                            />
+                          </div>
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => setShowAdvancedAddress(false)}
+                          className="text-sm font-medium text-slate-500 hover:text-slate-700"
+                        >
+                          Ocultar detalhes
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Google Maps Actions */}
+                    <div className="pt-4 border-t border-slate-100 flex flex-col gap-3">
+                      {(settingsForm.locationName || settingsForm.locationAddress) && (
+                        <a 
+                          href={settingsForm.locationMapsLink || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([settingsForm.locationName, settingsForm.locationAddress, settingsForm.locationCity, settingsForm.locationState].filter(Boolean).join(', '))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-medium transition-colors sm:self-start w-full sm:w-auto"
+                        >
+                          <svg className="w-5 h-5 text-blue-500" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                          </svg>
+                          Ver no Google Maps
+                        </a>
+                      )}
+
+                      <div>
+                        <button 
+                          type="button"
+                          onClick={() => setShowAdvancedMaps(!showAdvancedMaps)}
+                          className="text-sm text-slate-500 hover:text-slate-700 font-medium"
+                        >
+                          Opções avançadas
+                        </button>
+                        
+                        {showAdvancedMaps && (
+                          <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Usar um link personalizado do Google Maps</label>
+                            <input 
+                              type="text" 
+                              value={settingsForm.locationMapsLink}
+                              onChange={e => setSettingsForm({...settingsForm, locationMapsLink: e.target.value})}
+                              placeholder="https://maps.app.goo.gl/..."
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                            />
+                            <p className="text-xs text-slate-500 mt-1">Se preenchido, ignoramos a pesquisa automática e usamos este link.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+                {settingsStep === 3 && (
+                  <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Capa</label>
+                      <select 
+                        value={settingsForm.coverMediaType} 
+                        onChange={e => setSettingsForm({...settingsForm, coverMediaType: e.target.value as any})} 
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white"
+                      >
+                        <option value="image">Imagem</option>
+                        <option value="video">Vídeo</option>
+                      </select>
+                    </div>
+
+                    {settingsForm.coverMediaType === 'video' ? (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">URL do Vídeo (MP4)</label>
+                        <input 
+                          type="url" 
+                          value={settingsForm.coverVideoUrl} 
+                          onChange={e => setSettingsForm({...settingsForm, coverVideoUrl: e.target.value})} 
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                          placeholder="https://exemplo.com/video.mp4"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">URL da Foto de Capa (Hero)</label>
+                        <input 
+                          type="url" 
+                          value={settingsForm.coverImage}
+                          onChange={e => setSettingsForm({...settingsForm, coverImage: e.target.value})}
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none mb-3" 
+                          placeholder="https://exemplo.com/foto.jpg"
+                        />
+                        {settingsForm.coverImage && (
+                          <div className="relative rounded-lg overflow-hidden border border-slate-200">
+                            <img src={settingsForm.coverImage} alt="Preview" className="w-full h-40 object-cover" />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        História ({settingsForm.eventType === 'casamento' ? 'do Casal' : 'do Aniversariante'})
+                      </label>
+                      <textarea 
+                        rows={6}
+                        value={settingsForm.story}
+                        onChange={e => setSettingsForm({...settingsForm, story: e.target.value})}
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none resize-y" 
+                        placeholder="Conte um pouco da sua história..."
+                      />
+                    </div>
+                  </div>
+                )}
+              </form>
+
+              {/* Footer Actions */}
+              <div className="p-4 sm:p-6 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <button 
+                  type="button" 
+                  onClick={() => setSettingsStep(Math.max(1, settingsStep - 1))}
+                  className={`px-4 py-2 font-medium rounded-lg transition-colors ${settingsStep > 1 ? 'text-slate-700 hover:bg-slate-200' : 'invisible'}`}
+                >
+                  Voltar
+                </button>
+                
+                {settingsStep < 3 ? (
+                  <button 
+                    type="button" 
+                    onClick={() => setSettingsStep(settingsStep + 1)}
+                    className="px-6 py-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors"
                   >
-                    <option value="casamento">Casamento</option>
-                    <option value="aniversário">Aniversário</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Título do Evento</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={settingsForm.title}
-                    onChange={e => setSettingsForm({...settingsForm, title: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Data e Hora do Evento</label>
-                  <input 
-                    type="datetime-local" 
-                    required
-                    value={settingsForm.date.slice(0, 16)}
-                    onChange={e => setSettingsForm({...settingsForm, date: new Date(e.target.value).toISOString()})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nome do Local</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={settingsForm.locationName}
-                    onChange={e => setSettingsForm({...settingsForm, locationName: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Endereço (Rua, Número)</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={settingsForm.locationAddress}
-                    onChange={e => setSettingsForm({...settingsForm, locationAddress: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Cidade</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={settingsForm.locationCity}
-                    onChange={e => setSettingsForm({...settingsForm, locationCity: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Estado (UF)</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={settingsForm.locationState}
-                    onChange={e => setSettingsForm({...settingsForm, locationState: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Link do Google Maps</label>
-                  <input 
-                    type="text" 
-                    value={settingsForm.locationMapsLink}
-                    onChange={e => setSettingsForm({...settingsForm, locationMapsLink: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Latitude (Opcional)</label>
-                  <input 
-                    type="text" 
-                    value={settingsForm.locationLat}
-                    onChange={e => setSettingsForm({...settingsForm, locationLat: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Longitude (Opcional)</label>
-                  <input 
-                    type="text" 
-                    value={settingsForm.locationLng}
-                    onChange={e => setSettingsForm({...settingsForm, locationLng: e.target.value})}
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">História ({settingsForm.eventType === 'casamento' ? 'do Casal' : 'do Aniversariante'})</label>
-                <textarea 
-                  rows={5}
-                  value={settingsForm.story}
-                  onChange={e => setSettingsForm({...settingsForm, story: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none resize-none" 
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">URL da Foto de Capa (Hero)</label>
-                <input 
-                  type="text" 
-                  value={settingsForm.coverImage}
-                  onChange={e => setSettingsForm({...settingsForm, coverImage: e.target.value})}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none mb-2" 
-                />
-                {settingsForm.coverImage && (
-                  <img src={settingsForm.coverImage} alt="Preview" className="h-32 object-cover rounded-lg border border-slate-200" />
+                    Continuar
+                  </button>
+                ) : (
+                  <button 
+                    type="button" 
+                    onClick={handleSettingsSave}
+                    className="px-6 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
+                  >
+                    Salvar Alterações
+                  </button>
                 )}
               </div>
-
-              <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors">
-                Salvar Alterações
-              </button>
-            </form>
+            </div>
           </div>
         )}
-
       </main>
     </div>
   );

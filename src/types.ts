@@ -41,6 +41,7 @@ export type Guest = {
   id: string;
   name: string;
   status: 'Confirmado' | 'Pendente' | 'Não vai';
+  confirmationCode?: string;
 };
 
 export type Transaction = {
@@ -71,8 +72,6 @@ export type LocationDetails = {
   city: string;
   state: string;
   mapsLink: string;
-  latitude: string;
-  longitude: string;
 };
 
 export type Host = {
@@ -89,5 +88,8 @@ export type EventDetails = {
   location: LocationDetails;
   story: string;
   coverImage: string;
+  coverMediaType?: 'image' | 'video';
+  coverVideoUrl?: string;
   themeColor: string;
+  slug?: string;
 };

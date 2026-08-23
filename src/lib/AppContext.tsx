@@ -42,12 +42,15 @@ type AppContextType = {
   deleteExpense: (id: string) => void;
   
   isLoading: boolean;
+  isNotFound: boolean;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string }> = ({ children, hostId = 'default' }) => {
   const [isLoading, setIsLoading] = useState(true);
+  const [isNotFound, setIsNotFound] = useState(false);
+  const [resolvedHostId, setResolvedHostId] = useState<string>(hostId);
 
   // Try to load from localStorage, fallback to initial data
   const loadState = <T,>(key: string, fallback: T): T => {
@@ -69,6 +72,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   const [schedule, setSchedule] = useState<ScheduleItem[]>(() => loadState('schedule', initialSchedule));
   const [expenses, setExpenses] = useState<ExpenseItem[]>(() => loadState('expenses', initialExpenses));
 
+  
   // Load from Supabase on mount if available
   useEffect(() => {
     const fetchData = async () => {
@@ -78,6 +82,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       }
       
       try {
+        let actualHostId = hostId;
+        
+        // Check if hostId is actually a slug
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
+        
+        if (!isUuid) {
+           const { data: slugData } = await supabase.from('event_details').select('host_id').eq('slug', hostId).single();
+           if (slugData) {
+              actualHostId = slugData.host_id;
+              setResolvedHostId(actualHostId);
+           } else {
+              setIsNotFound(true);
+              setIsLoading(false);
+              return;
+           }
+        }
+
         const [
           { data: eventData },
           { data: paymentData },
@@ -89,15 +110,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           { data: scheduleData },
           { data: expData }
         ] = await Promise.all([
-          supabase.from('event_details').select('*').eq('host_id', hostId).single(),
-          supabase.from('payment_settings').select('*').eq('host_id', hostId).single(),
-          supabase.from('gifts').select('*').eq('host_id', hostId),
-          supabase.from('messages').select('*').eq('host_id', hostId),
-          supabase.from('guests').select('*').eq('host_id', hostId),
-          supabase.from('transactions').select('*').eq('host_id', hostId),
-          supabase.from('gallery').select('*').eq('host_id', hostId),
-          supabase.from('schedule').select('*').eq('host_id', hostId),
-          supabase.from('expenses').select('*').eq('host_id', hostId)
+          supabase.from('event_details').select('*').eq('host_id', actualHostId).single(),
+          supabase.from('payment_settings').select('*').eq('host_id', actualHostId).single(),
+          supabase.from('gifts').select('*').eq('host_id', actualHostId),
+          supabase.from('messages').select('*').eq('host_id', actualHostId),
+          supabase.from('guests').select('*').eq('host_id', actualHostId),
+          supabase.from('transactions').select('*').eq('host_id', actualHostId),
+          supabase.from('gallery').select('*').eq('host_id', actualHostId),
+          supabase.from('schedule').select('*').eq('host_id', actualHostId),
+          supabase.from('expenses').select('*').eq('host_id', actualHostId)
         ]);
 
         if (eventData) {
@@ -110,18 +131,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
               address: eventData.location_address || '',
               city: eventData.location_city || '',
               state: eventData.location_state || '',
-              mapsLink: eventData.location_maps_link || '',
-              latitude: eventData.location_latitude || '',
-              longitude: eventData.location_longitude || ''
+              mapsLink: eventData.location_maps_link || ''
             },
             story: eventData.story || '',
             coverImage: eventData.cover_image || '',
-            themeColor: eventData.theme_color || 'teal'
+            coverMediaType: eventData.cover_media_type || 'image',
+            coverVideoUrl: eventData.cover_video_url || '',
+            themeColor: eventData.theme_color || 'teal',
+            slug: eventData.slug || ''
           });
         } else {
           setEventDetailsState({
-            eventType: 'casamento', title: '', date: '', story: '', coverImage: '', themeColor: '#0f766e',
-            location: { name: '', address: '', city: '', state: '', mapsLink: '', latitude: '', longitude: '' }
+            eventType: 'casamento', title: '', date: '', story: '', coverImage: '', coverMediaType: 'image', coverVideoUrl: '', themeColor: '#0f766e', slug: '',
+            location: { name: '', address: '', city: '', state: '', mapsLink: '' }
           });
         }
         
@@ -164,7 +186,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         setGuests(guestsData && guestsData.length > 0 ? guestsData.map(g => ({
           id: g.id,
           name: g.name,
-          status: g.status as any
+          status: g.status as any,
+          confirmationCode: g.confirmation_code
         })) : []);
         
         setTransactions(txData && txData.length > 0 ? txData.map(t => ({
@@ -222,9 +245,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
   const setEventDetails = async (details: EventDetails) => {
     setEventDetailsState(details);
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { error } = await supabase.from('event_details').upsert({
-        host_id: hostId,
+        host_id: resolvedHostId,
         event_type: details.eventType,
         title: details.title,
         date: details.date,
@@ -233,11 +256,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         location_city: details.location.city,
         location_state: details.location.state,
         location_maps_link: details.location.mapsLink,
-        location_latitude: details.location.latitude,
-        location_longitude: details.location.longitude,
         story: details.story,
         cover_image: details.coverImage,
-        theme_color: details.themeColor
+        cover_media_type: details.coverMediaType || 'image',
+        cover_video_url: details.coverVideoUrl || '',
+        theme_color: details.themeColor,
+        slug: details.slug || null // use null instead of empty string for UNIQUE constraint
       });
       if (error) {
         console.error("Upsert event_details error:", error);
@@ -248,9 +272,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   
   const setPaymentSettings = async (settings: PaymentSettings) => {
     setPaymentSettingsState(settings);
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       await supabase.from('payment_settings').upsert({
-        host_id: hostId,
+        host_id: resolvedHostId,
         pix_key_type: settings.pixKeyType,
         pix_key: settings.pixKey,
         receiver_name: settings.receiverName,
@@ -269,9 +293,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     const newGift = { ...gift, id: tempId };
     setGifts(prev => [...prev, newGift]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('gifts').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         title: gift.title,
         description: gift.description,
         price: gift.price,
@@ -288,7 +312,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   
   const updateGift = async (id: string, updatedGift: Omit<Gift, 'id'>) => {
     setGifts(prev => prev.map(g => g.id === id ? { ...updatedGift, id } : g));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('gifts').update({
         title: updatedGift.title,
         description: updatedGift.description,
@@ -302,7 +326,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   
   const deleteGift = async (id: string) => {
     setGifts(prev => prev.filter(g => g.id !== id));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('gifts').delete().eq('id', id);
     }
   };
@@ -312,9 +336,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     const newMessage = { ...message, id: tempId, createdAt: new Date().toISOString() };
     setMessages(prev => [newMessage, ...prev]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('messages').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         author_name: message.authorName,
         content: message.content
       }]).select().single();
@@ -327,25 +351,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
   const addGuest = async (guest: Omit<Guest, 'id'>) => {
     const tempId = Math.random().toString(36).substr(2, 9);
-    const newGuest = { ...guest, id: tempId };
+    const confirmationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const newGuest = { ...guest, id: tempId, confirmationCode };
     setGuests(prev => [...prev, newGuest]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('guests').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         name: guest.name,
-        status: guest.status
+        status: guest.status,
+        confirmation_code: confirmationCode
       }]).select().single();
       
       if (data) {
-        setGuests(prev => prev.map(g => g.id === tempId ? { ...g, id: data.id } : g));
+        setGuests(prev => prev.map(g => g.id === tempId ? { ...g, id: data.id, confirmationCode: data.confirmation_code } : g));
       }
     }
   };
   
   const updateGuest = async (id: string, updates: Partial<Guest>) => {
     setGuests(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('guests').update({
         name: updates.name,
         status: updates.status
@@ -355,7 +381,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   
   const deleteGuest = async (id: string) => {
     setGuests(prev => prev.filter(g => g.id !== id));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('guests').delete().eq('id', id);
     }
   };
@@ -370,9 +396,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     };
     setTransactions(prev => [newTx, ...prev]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('transactions').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         gift_title: transaction.giftTitle,
         donor_name: transaction.donorName,
         amount: transaction.amount,
@@ -390,9 +416,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     const tempId = Math.random().toString(36).substr(2, 9);
     setGallery(prev => [...prev, { ...image, id: tempId }]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('gallery').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         url: image.url,
         caption: image.caption,
         display_order: image.order || 0
@@ -405,7 +431,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const updateGalleryImage = async (id: string, updates: Partial<GalleryImage>) => {
     setGallery(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('gallery').update({
         url: updates.url,
         caption: updates.caption,
@@ -415,7 +441,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const deleteGalleryImage = async (id: string) => {
     setGallery(prev => prev.filter(i => i.id !== id));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('gallery').delete().eq('id', id);
     }
   };
@@ -424,9 +450,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     const tempId = Math.random().toString(36).substr(2, 9);
     setSchedule(prev => [...prev, { ...item, id: tempId }]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('schedule').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         time: item.time,
         title: item.title,
         description: item.description
@@ -439,7 +465,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const updateScheduleItem = async (id: string, updates: Partial<ScheduleItem>) => {
     setSchedule(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('schedule').update({
         time: updates.time,
         title: updates.title,
@@ -449,7 +475,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const deleteScheduleItem = async (id: string) => {
     setSchedule(prev => prev.filter(s => s.id !== id));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('schedule').delete().eq('id', id);
     }
   };
@@ -458,9 +484,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     const tempId = Math.random().toString(36).substr(2, 9);
     setExpenses(prev => [...prev, { ...expense, id: tempId }]);
     
-    if (supabase && hostId !== 'default') {
+    if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('expenses').insert([{
-        host_id: hostId,
+        host_id: resolvedHostId,
         title: expense.title,
         amount: expense.amount,
         date: expense.date,
@@ -474,7 +500,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const updateExpense = async (id: string, updates: Partial<ExpenseItem>) => {
     setExpenses(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('expenses').update({
         title: updates.title,
         amount: updates.amount,
@@ -485,7 +511,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   };
   const deleteExpense = async (id: string) => {
     setExpenses(prev => prev.filter(e => e.id !== id));
-    if (supabase && hostId !== 'default' && id.length > 10) {
+    if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('expenses').delete().eq('id', id);
     }
   };
@@ -501,7 +527,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
       schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
       expenses, addExpense, updateExpense, deleteExpense,
-      isLoading
+      isLoading, isNotFound
     }}>
       {children}
     </AppContext.Provider>
