@@ -118,6 +118,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
             coverImage: eventData.cover_image || '',
             themeColor: eventData.theme_color || 'teal'
           });
+        } else {
+          setEventDetailsState({
+            eventType: 'casamento', title: '', date: '', story: '', coverImage: '', themeColor: '#0f766e',
+            location: { name: '', address: '', city: '', state: '', mapsLink: '', latitude: '', longitude: '' }
+          });
         }
         
         if (paymentData) {
@@ -132,76 +137,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
             gatewayEnvironment: paymentData.gateway_environment as any,
             gatewayWebhookUrl: paymentData.gateway_webhook_url || ''
           });
+        } else {
+          setPaymentSettingsState({
+            pixKeyType: 'email', pixKey: '', receiverName: '', city: '',
+            gatewayProvider: 'mercadopago', gatewayPublicKey: '', gatewayAccessToken: '', gatewayEnvironment: 'sandbox', gatewayWebhookUrl: ''
+          });
         }
         
-        if (giftsData && giftsData.length > 0) {
-          setGifts(giftsData.map(g => ({
-            id: g.id,
-            title: g.title,
-            description: g.description,
-            price: g.price,
-            imageUrl: g.image_url,
-            category: g.category,
-            quantity: g.quantity
-          })));
-        }
+        setGifts(giftsData && giftsData.length > 0 ? giftsData.map(g => ({
+          id: g.id,
+          title: g.title,
+          description: g.description,
+          price: g.price,
+          imageUrl: g.image_url,
+          category: g.category,
+          quantity: g.quantity
+        })) : []);
         
-        if (messagesData && messagesData.length > 0) {
-          setMessages(messagesData.map(m => ({
-            id: m.id,
-            authorName: m.author_name,
-            content: m.content,
-            createdAt: m.created_at
-          })));
-        }
+        setMessages(messagesData && messagesData.length > 0 ? messagesData.map(m => ({
+          id: m.id,
+          authorName: m.author_name,
+          content: m.content,
+          createdAt: m.created_at
+        })) : []);
         
-        if (guestsData && guestsData.length > 0) {
-          setGuests(guestsData.map(g => ({
-            id: g.id,
-            name: g.name,
-            status: g.status as any
-          })));
-        }
+        setGuests(guestsData && guestsData.length > 0 ? guestsData.map(g => ({
+          id: g.id,
+          name: g.name,
+          status: g.status as any
+        })) : []);
         
-        if (txData && txData.length > 0) {
-          setTransactions(txData.map(t => ({
-            id: t.id,
-            giftTitle: t.gift_title,
-            donorName: t.donor_name,
-            amount: t.amount,
-            method: t.method as any,
-            date: t.date,
-            status: t.status as any
-          })));
-        }
+        setTransactions(txData && txData.length > 0 ? txData.map(t => ({
+          id: t.id,
+          giftTitle: t.gift_title,
+          donorName: t.donor_name,
+          amount: t.amount,
+          method: t.method as any,
+          date: t.date,
+          status: t.status as any
+        })) : []);
         
-        if (galleryData && galleryData.length > 0) {
-          setGallery(galleryData.map(g => ({
-            id: g.id,
-            url: g.url,
-            caption: g.caption,
-            order: g.display_order
-          })).sort((a, b) => (a.order || 0) - (b.order || 0)));
-        }
+        setGallery(galleryData && galleryData.length > 0 ? galleryData.map(g => ({
+          id: g.id,
+          url: g.url,
+          caption: g.caption,
+          order: g.display_order
+        })).sort((a, b) => (a.order || 0) - (b.order || 0)) : []);
         
-        if (scheduleData && scheduleData.length > 0) {
-          setSchedule(scheduleData.map(s => ({
-            id: s.id,
-            time: s.time,
-            title: s.title,
-            description: s.description
-          })));
-        }
+        setSchedule(scheduleData && scheduleData.length > 0 ? scheduleData.map(s => ({
+          id: s.id,
+          time: s.time,
+          title: s.title,
+          description: s.description
+        })) : []);
         
-        if (expData && expData.length > 0) {
-          setExpenses(expData.map(e => ({
-            id: e.id,
-            title: e.title,
-            amount: e.amount,
-            date: e.date,
-            status: e.status as any
-          })));
-        }
+        setExpenses(expData && expData.length > 0 ? expData.map(e => ({
+          id: e.id,
+          title: e.title,
+          amount: e.amount,
+          date: e.date,
+          status: e.status as any
+        })) : []);
         
       } catch (err) {
         console.warn("Error fetching from Supabase", err);
@@ -227,7 +223,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   const setEventDetails = async (details: EventDetails) => {
     setEventDetailsState(details);
     if (supabase && hostId !== 'default') {
-      await supabase.from('event_details').upsert({
+      const { error } = await supabase.from('event_details').upsert({
         host_id: hostId,
         event_type: details.eventType,
         title: details.title,
@@ -243,6 +239,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         cover_image: details.coverImage,
         theme_color: details.themeColor
       });
+      if (error) {
+        console.error("Upsert event_details error:", error);
+        throw new Error(error.message || JSON.stringify(error));
+      }
     }
   };
   

@@ -74,6 +74,37 @@ export default function AdminDashboard() {
     gatewayWebhookUrl: paymentSettings.gatewayWebhookUrl || '',
   });
 
+  React.useEffect(() => {
+    setSettingsForm({
+      eventType: eventDetails.eventType,
+      title: eventDetails.title,
+      date: eventDetails.date,
+      locationName: eventDetails.location.name,
+      locationAddress: eventDetails.location.address,
+      locationCity: eventDetails.location.city,
+      locationState: eventDetails.location.state,
+      locationMapsLink: eventDetails.location.mapsLink,
+      locationLat: eventDetails.location.latitude,
+      locationLng: eventDetails.location.longitude,
+      story: eventDetails.story,
+      coverImage: eventDetails.coverImage,
+    });
+  }, [eventDetails]);
+
+  React.useEffect(() => {
+    setPaymentForm({
+      pixKeyType: paymentSettings.pixKeyType,
+      pixKey: paymentSettings.pixKey,
+      receiverName: paymentSettings.receiverName,
+      city: paymentSettings.city,
+      gatewayProvider: paymentSettings.gatewayProvider,
+      gatewayPublicKey: paymentSettings.gatewayPublicKey,
+      gatewayAccessToken: paymentSettings.gatewayAccessToken || '',
+      gatewayEnvironment: paymentSettings.gatewayEnvironment,
+      gatewayWebhookUrl: paymentSettings.gatewayWebhookUrl || '',
+    });
+  }, [paymentSettings]);
+
   const handleExportCSV = () => {
     const headers = ['Nome', 'Status'];
     const csvContent = [
@@ -194,6 +225,7 @@ export default function AdminDashboard() {
 
   const handleSettingsSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("Saving settings...");
     await setEventDetails({
       ...eventDetails,
       eventType: settingsForm.eventType,
@@ -211,7 +243,7 @@ export default function AdminDashboard() {
       story: settingsForm.story,
       coverImage: settingsForm.coverImage,
     });
-    alert('Configurações salvas com sucesso!');
+    try { await setEventDetails({ ...eventDetails, eventType: settingsForm.eventType, title: settingsForm.title, date: settingsForm.date, location: { name: settingsForm.locationName, address: settingsForm.locationAddress, city: settingsForm.locationCity, state: settingsForm.locationState, mapsLink: settingsForm.locationMapsLink, latitude: settingsForm.locationLat, longitude: settingsForm.locationLng }, story: settingsForm.story, coverImage: settingsForm.coverImage }); alert('Configurações salvas com sucesso!'); } catch(err) { alert('Erro: ' + err); }
   };
 
   const handlePaymentSave = async (e: React.FormEvent) => {

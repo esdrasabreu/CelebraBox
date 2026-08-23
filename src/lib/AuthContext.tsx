@@ -2,11 +2,13 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Host } from '../types';
 import { supabase } from './supabase';
 
+type AuthResponse = { success: boolean; error?: string };
+
 type AuthContextType = {
   host: Host | null;
-  login: (email: string, passwordHash: string) => Promise<boolean>;
-  register: (name: string, email: string, passwordHash: string) => Promise<boolean>;
-  logout: () => void;
+  login: (email: string, passwordHash: string) => Promise<AuthResponse>;
+  register: (name: string, email: string, passwordHash: string) => Promise<AuthResponse>;
+  logout: () => Promise<void>;
   isLoading: boolean;
 };
 
@@ -72,16 +74,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
           
           setIsLoading(false);
-          // We can't easily return the cleanup from here, but this is a global listener anyway
+          return () => { subscription.unsubscribe(); };
         } catch (err) {
           console.warn("Error setting up auth listener:", err);
           setIsLoading(false);
         }
       } else {
-        const savedHost = localStorage.getItem('wedding_tech_current_host');
-        if (savedHost) {
-          setHost(JSON.parse(savedHost));
-        }
         setIsLoading(false);
       }
     };
@@ -89,94 +87,86 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkSession();
   }, []);
 
-  useEffect(() => {
+  const login = async (email: string, passwordHash: string): Promise<AuthResponse> => {
     if (!supabase) {
-      if (host) {
-        localStorage.setItem('wedding_tech_current_host', JSON.stringify(host));
-      } else {
-        localStorage.removeItem('wedding_tech_current_host');
-      }
+      return { success: false, error: "Supabase não está configurado corretamente." };
     }
-  }, [host]);
 
-  const login = async (email: string, passwordHash: string) => {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password: passwordHash,
-        });
-          
-        if (data?.user && !error) {
-          return true;
-        }
-      } catch (err) {
-        console.warn("Supabase login error:", err);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password: passwordHash,
+      });
+        
+      if (error) {
+        console.warn("Supabase login error:", error);
+        return { success: false, error: error.message };
       }
-      return false;
+
+      if (data?.user) {
+        // Fetch the profile synchronously to avoid redirect loops
+        const { data: profile } = await supabase
+          .from('hosts')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+          
+        if (profile) {
+          setHost({ id: profile.id, name: profile.name, email: profile.email, passwordHash: '' });
+        } else {
+          setHost({ id: data.user.id, name: data.user.user_metadata?.name || 'User', email: data.user.email, passwordHash: '' });
+        }
+        return { success: true };
+      }
+    } catch (err: any) {
+      console.warn("Supabase login exception:", err);
+      return { success: false, error: err.message || "Erro desconhecido ao fazer login." };
     }
     
-    const usersStr = localStorage.getItem('wedding_tech_users');
-    const users: Host[] = usersStr ? JSON.parse(usersStr) : [];
-    const user = users.find(u => u.email === email && u.passwordHash === passwordHash);
-    
-    if (user) {
-      setHost(user);
-      return true;
-    }
-    return false;
+    return { success: false, error: "Erro desconhecido ao fazer login." };
   };
 
-  const register = async (name: string, email: string, passwordHash: string) => {
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password: passwordHash,
-          options: {
-            data: { name }
-          }
-        });
-          
-        if (data?.user && !error) {
-          const { error: insertError } = await supabase
-            .from('hosts')
-            .insert([{ 
-              id: data.user.id,
-              name, 
-              email 
-            }]);
-            
-          if (insertError) {
-            console.warn("Failed to create host profile", insertError);
-          }
-          return true;
+  const register = async (name: string, email: string, passwordHash: string): Promise<AuthResponse> => {
+    if (!supabase) {
+      return { success: false, error: "Supabase não está configurado corretamente." };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: passwordHash,
+        options: {
+          data: { name }
         }
-        console.warn(error);
-      } catch (err) {
-        console.warn("Supabase register error:", err);
+      });
+        
+      if (error) {
+        console.warn("Supabase register error:", error);
+        return { success: false, error: error.message };
       }
-      return false;
-    }
 
-    const usersStr = localStorage.getItem('wedding_tech_users');
-    const users: Host[] = usersStr ? JSON.parse(usersStr) : [];
-    
-    if (users.some(u => u.email === email)) {
-      return false;
+      if (data?.user) {
+        const { error: insertError } = await supabase
+          .from('hosts')
+          .insert([{ 
+            id: data.user.id,
+            name, 
+            email 
+          }]);
+          
+        if (insertError) {
+          console.warn("Failed to create host profile", insertError);
+        }
+          
+        setHost({ id: data.user.id, name, email, passwordHash: '' });
+        return { success: true };
+      }
+    } catch (err: any) {
+      console.warn("Supabase register exception:", err);
+      return { success: false, error: err.message || "Erro desconhecido ao registrar." };
     }
-
-    const newUser: Host = {
-      id: Math.random().toString(36).substring(2, 9),
-      name,
-      email,
-      passwordHash
-    };
     
-    users.push(newUser);
-    localStorage.setItem('wedding_tech_users', JSON.stringify(users));
-    setHost(newUser);
-    return true;
+    return { success: false, error: "Erro desconhecido ao registrar." };
   };
 
   const logout = async () => {
@@ -204,4 +194,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

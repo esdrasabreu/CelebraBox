@@ -174,9 +174,9 @@ export default function PublicPage() {
           </h1>
           <div className="h-px w-24 bg-white/50 mx-auto mb-6" />
           <p className="text-xl md:text-2xl text-white/90 mb-8 font-light">
-            {new Intl.DateTimeFormat('pt-BR', { 
+            {eventDetails.date ? new Intl.DateTimeFormat('pt-BR', { 
               day: '2-digit', month: 'long', year: 'numeric' 
-            }).format(new Date(eventDetails.date))}
+            }).format(new Date(eventDetails.date)) : 'Data a definir'}
           </p>
           
           <CountdownTimer targetDate={eventDetails.date} />
@@ -466,7 +466,7 @@ export default function PublicPage() {
                   <div className="flex items-center justify-between text-sm text-slate-500">
                     <span className="font-medium">{msg.authorName}</span>
                     <span>
-                      {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(msg.createdAt))}
+                      {msg.createdAt ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(msg.createdAt)) : ''}
                     </span>
                   </div>
                 </div>

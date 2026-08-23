@@ -10,6 +10,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   
   const { login, register } = useAuth();
   const navigate = useNavigate();
@@ -17,25 +18,34 @@ export default function Login() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setLoading(true);
 
-    if (isLogin) {
-      const success = await login(email, password);
-      if (success) {
-        navigate('/admin');
+    try {
+      if (isLogin) {
+        const response = await login(email, password);
+        if (response.success) {
+          navigate('/admin');
+        } else {
+          setError(response.error || 'E-mail ou senha inválidos.');
+        }
       } else {
-        setError('E-mail ou senha inválidos.');
+        if (!name || !email || !password) {
+          setError('Preencha todos os campos.');
+          setLoading(false);
+          return;
+        }
+        
+        const response = await register(name, email, password);
+        if (response.success) {
+          navigate('/admin');
+        } else {
+          setError(response.error || 'Erro ao registrar.');
+        }
       }
-    } else {
-      if (!name || !email || !password) {
-        setError('Preencha todos os campos.');
-        return;
-      }
-      const success = await register(name, email, password);
-      if (success) {
-        navigate('/admin');
-      } else {
-        setError('Usuário já existe com este e-mail.');
-      }
+    } catch (err: any) {
+      setError(err.message || 'Ocorreu um erro inesperado.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,6 +85,7 @@ export default function Login() {
                 onChange={e => setName(e.target.value)}
                 className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
                 placeholder="Seu nome"
+                disabled={loading}
               />
             </div>
           )}
@@ -88,6 +99,7 @@ export default function Login() {
               onChange={e => setEmail(e.target.value)}
               className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               placeholder="seu@email.com"
+              disabled={loading}
             />
           </div>
 
@@ -100,14 +112,16 @@ export default function Login() {
               onChange={e => setPassword(e.target.value)}
               className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
               placeholder="••••••••"
+              disabled={loading}
             />
           </div>
 
           <button
             type="submit"
-            className="w-full py-3 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors shadow-md"
+            disabled={loading}
+            className={`w-full py-3 bg-teal-600 text-white rounded-lg font-medium transition-colors shadow-md ${loading ? 'opacity-70 cursor-not-allowed' : 'hover:bg-teal-700'}`}
           >
-            {isLogin ? 'Entrar' : 'Cadastrar'}
+            {loading ? 'Processando...' : (isLogin ? 'Entrar' : 'Cadastrar')}
           </button>
         </form>
 
@@ -117,6 +131,7 @@ export default function Login() {
             <button
               onClick={() => setIsLogin(!isLogin)}
               className="ml-2 text-teal-600 font-semibold hover:underline"
+              disabled={loading}
             >
               {isLogin ? 'Criar agora' : 'Fazer login'}
             </button>

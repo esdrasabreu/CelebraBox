@@ -10,6 +10,8 @@ export default function CountdownTimer({ targetDate }: { targetDate: string }) {
   });
 
   useEffect(() => {
+    if (!targetDate || isNaN(new Date(targetDate).getTime())) return;
+    
     const interval = setInterval(() => {
       const now = new Date();
       const target = new Date(targetDate);
@@ -29,6 +31,10 @@ export default function CountdownTimer({ targetDate }: { targetDate: string }) {
 
     return () => clearInterval(interval);
   }, [targetDate]);
+
+  if (!targetDate || isNaN(new Date(targetDate).getTime())) {
+    return null;
+  }
 
   return (
     <div className="flex justify-center gap-4 text-center mt-6">
