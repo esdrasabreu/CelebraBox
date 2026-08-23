@@ -43,6 +43,7 @@ type AppContextType = {
   
   isLoading: boolean;
   isNotFound: boolean;
+  resolvedHostId: string;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -527,7 +528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
       schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
       expenses, addExpense, updateExpense, deleteExpense,
-      isLoading, isNotFound
+      isLoading, isNotFound, resolvedHostId
     }}>
       {children}
     </AppContext.Provider>

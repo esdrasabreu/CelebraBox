@@ -15,7 +15,8 @@ export default function AdminDashboard() {
     transactions,
     gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
     schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
-    expenses, addExpense, updateExpense, deleteExpense
+    expenses, addExpense, updateExpense, deleteExpense,
+    resolvedHostId
   } = useAppContext();
   
   const [activeTab, setActiveTab] = useState<'overview' | 'rsvp' | 'gifts-catalog' | 'finance' | 'payments-config' | 'settings' | 'gallery' | 'schedule' | 'expenses'>('overview');
@@ -333,7 +334,7 @@ export default function AdminDashboard() {
           <div className="mb-2 text-xs text-slate-500 px-4">
             Logado como: <span className="text-slate-300 font-medium">{host?.name}</span>
           </div>
-          <a href={`/e/${eventDetails.slug || host?.id}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
+          <a href={`/e/${eventDetails.slug || resolvedHostId}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
             <LayoutDashboard className="w-4 h-4" />
             <span className="font-medium text-sm">Ver Site Público</span>
           </a>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { MapPin, Navigation, MessageSquare, Heart, Gift as GiftIcon, Cake, Menu, X, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
@@ -148,9 +148,9 @@ export default function PublicPage() {
       setMeta('twitter:image', eventDetails.coverImage);
       
       // JSON-LD
-      let script = document.querySelector('#jsonld-event');
+      let script = document.querySelector('#jsonld-event') as HTMLScriptElement | null;
       if (!script) {
-        script = document.createElement('script');
+        script = document.createElement('script') as HTMLScriptElement;
         script.id = 'jsonld-event';
         script.type = 'application/ld+json';
         document.head.appendChild(script);
