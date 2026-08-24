@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt } from 'lucide-react';
+import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt, UploadCloud } from 'lucide-react';
 import { useAppContext } from '../lib/AppContext';
 import { useAuth } from '../lib/AuthContext';
 import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
+import FileUpload from '../components/FileUpload';
+import { uploadFile } from '../lib/storage';
 
 export default function AdminDashboard() {
   const { host, logout } = useAuth();
@@ -32,11 +34,11 @@ export default function AdminDashboard() {
   const [isEditingGuest, setIsEditingGuest] = useState(false);
 
   // GIFTS STATE
-  const [giftForm, setGiftForm] = useState({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' });
+  const [giftForm, setGiftForm] = useState({ id: '', title: '', description: '', price: '', imageUrl: '', imageStoragePath: '', category: '', quantity: '' });
   const [isEditingGift, setIsEditingGift] = useState(false);
 
   // GALLERY STATE
-  const [galleryForm, setGalleryForm] = useState({ id: '', url: '', caption: '', order: 0 });
+  const [galleryForm, setGalleryForm] = useState({ id: '', url: '', storagePath: '', caption: '', order: 0 });
   const [isEditingGallery, setIsEditingGallery] = useState(false);
 
   // SCHEDULE STATE
@@ -158,6 +160,7 @@ export default function AdminDashboard() {
       description: giftForm.description,
       price: parseFloat(giftForm.price),
       imageUrl: giftForm.imageUrl,
+      imageStoragePath: giftForm.imageStoragePath || undefined,
       category: giftForm.category || undefined,
       quantity: giftForm.quantity ? parseInt(giftForm.quantity) : undefined
     };
@@ -168,12 +171,12 @@ export default function AdminDashboard() {
       addGift(payload);
     }
     
-    setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' });
+    setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', imageStoragePath: '', category: '', quantity: '' });
     setIsEditingGift(false);
   };
 
   const handleEditGift = (g: GiftType) => {
-    setGiftForm({ id: g.id, title: g.title, description: g.description, price: g.price.toString(), imageUrl: g.imageUrl, category: g.category || '', quantity: g.quantity?.toString() || '' });
+    setGiftForm({ id: g.id, title: g.title, description: g.description, price: g.price.toString(), imageUrl: g.imageUrl, imageStoragePath: g.imageStoragePath || '', category: g.category || '', quantity: g.quantity?.toString() || '' });
     setIsEditingGift(true);
   };
 
@@ -181,17 +184,46 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!galleryForm.url) return;
     if (isEditingGallery) {
-      updateGalleryImage(galleryForm.id, { url: galleryForm.url, caption: galleryForm.caption, order: galleryForm.order });
+      updateGalleryImage(galleryForm.id, { url: galleryForm.url, storagePath: galleryForm.storagePath, caption: galleryForm.caption, order: galleryForm.order });
     } else {
-      addGalleryImage({ url: galleryForm.url, caption: galleryForm.caption, order: galleryForm.order });
+      addGalleryImage({ url: galleryForm.url, storagePath: galleryForm.storagePath, caption: galleryForm.caption, order: galleryForm.order });
     }
-    setGalleryForm({ id: '', url: '', caption: '', order: 0 });
+    setGalleryForm({ id: '', url: '', storagePath: '', caption: '', order: 0 });
     setIsEditingGallery(false);
   };
 
   const handleEditGallery = (i: GalleryImage) => {
-    setGalleryForm({ id: i.id, url: i.url, caption: i.caption || '', order: i.order });
+    setGalleryForm({ id: i.id, url: i.url, storagePath: i.storagePath || '', caption: i.caption || '', order: i.order });
     setIsEditingGallery(true);
+  };
+
+  const handleMultiUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    
+    toast.info(`Fazendo upload de ${files.length} arquivos...`);
+    
+    let successCount = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        const file = files[i];
+        const res = await uploadFile('event_assets', `hosts/${resolvedHostId}/gallery`, file);
+        if (res) {
+          addGalleryImage({ url: res.url, storagePath: res.path, caption: '', order: gallery.length + i });
+          successCount++;
+        }
+      } catch (err) {
+        console.error('Erro no upload', err);
+      }
+    }
+    
+    if (successCount > 0) {
+      toast.success(`${successCount} fotos adicionadas à galeria!`);
+    } else {
+      toast.error('Erro ao fazer upload das fotos.');
+    }
+    
+    if (e.target) e.target.value = '';
   };
 
   const handleScheduleSubmit = (e: React.FormEvent) => {
@@ -370,6 +402,10 @@ export default function AdminDashboard() {
                   <span className="font-medium text-sm">Arrecadação Total</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">R$ {totalArrecadado.toFixed(2)}</div>
+                <div className="mt-2 text-xs text-slate-500 flex flex-col gap-0.5">
+                  <div className="flex justify-between"><span>Pix (Manual):</span> <span className="font-medium text-slate-700">R$ {totalPix.toFixed(2)}</span></div>
+                  <div className="flex justify-between"><span>Cartão (Plataforma):</span> <span className="font-medium text-slate-700">R$ {totalCartao.toFixed(2)}</span></div>
+                </div>
               </div>
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
@@ -450,8 +486,20 @@ export default function AdminDashboard() {
             </div>
             <form onSubmit={handleGallerySubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
               <div className="flex-1 w-full">
-                <label className="block text-xs font-medium text-slate-500 mb-1">URL da Imagem</label>
-                <input required type="url" value={galleryForm.url} onChange={e => setGalleryForm({...galleryForm, url: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="https://..." />
+                <label className="block text-xs font-medium text-slate-500 mb-1">Upload de Fotos</label>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="file" 
+                    multiple 
+                    accept="image/*"
+                    onChange={handleMultiUpload}
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 w-full">
+                <label className="block text-xs font-medium text-slate-500 mb-1">URL (Alternativa)</label>
+                <input type="url" value={galleryForm.url} onChange={e => setGalleryForm({...galleryForm, url: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="https://..." />
               </div>
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Legenda (Opcional)</label>
@@ -465,7 +513,7 @@ export default function AdminDashboard() {
                 {isEditingGallery ? 'Salvar Edição' : 'Adicionar'}
               </button>
               {isEditingGallery && (
-                <button type="button" onClick={() => { setIsEditingGallery(false); setGalleryForm({ id: '', url: '', caption: '', order: 0 }) }} className="w-full md:w-auto bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-300 transition-colors">Cancelar</button>
+                <button type="button" onClick={() => { setIsEditingGallery(false); setGalleryForm({ id: '', url: '', storagePath: '', caption: '', order: 0 }) }} className="w-full md:w-auto bg-slate-200 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-300 transition-colors">Cancelar</button>
               )}
             </form>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -707,8 +755,23 @@ export default function AdminDashboard() {
 
             <form onSubmit={handleGiftSubmit} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
               <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">{isEditingGift ? 'Editar Presente' : 'Adicionar Novo Presente'}</h3>
-              
+                
               <div className="grid md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <FileUpload 
+                    label="Imagem do Presente"
+                    bucket="event_assets"
+                    pathPrefix={`hosts/${resolvedHostId}/gifts`}
+                    accept="image/*"
+                    currentUrl={giftForm.imageUrl}
+                    onUploadSuccess={(url, path) => setGiftForm({...giftForm, imageUrl: url, imageStoragePath: path})}
+                    onClear={() => setGiftForm({...giftForm, imageUrl: '', imageStoragePath: ''})}
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-slate-400">Ou informe a URL manualmente:</span>
+                    <input type="url" value={giftForm.imageUrl} onChange={e => setGiftForm({...giftForm, imageUrl: e.target.value})} className="flex-1 px-3 py-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-teal-500 focus:outline-none text-xs" placeholder="https://..." />
+                  </div>
+                </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Título</label>
                   <input required type="text" value={giftForm.title} onChange={e => setGiftForm({...giftForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Cota da Lua de Mel" />
@@ -722,10 +785,6 @@ export default function AdminDashboard() {
                   <input required type="text" value={giftForm.description} onChange={e => setGiftForm({...giftForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Mensagem para convencer o convidado..." />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">URL da Imagem</label>
-                  <input required type="url" value={giftForm.imageUrl} onChange={e => setGiftForm({...giftForm, imageUrl: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="https://..." />
-                </div>
-                <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Categoria (Opcional)</label>
                   <input type="text" value={giftForm.category} onChange={e => setGiftForm({...giftForm, category: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Viagem, Casa" />
                 </div>
@@ -736,7 +795,7 @@ export default function AdminDashboard() {
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 {isEditingGift && (
-                  <button type="button" onClick={() => { setIsEditingGift(false); setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', category: '', quantity: '' }) }} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">Cancelar</button>
+                  <button type="button" onClick={() => { setIsEditingGift(false); setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', imageStoragePath: '', category: '', quantity: '' }) }} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">Cancelar</button>
                 )}
                 <button type="submit" className="px-6 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 shadow-sm">
                   {isEditingGift ? 'Salvar Alterações' : 'Criar Presente'}
@@ -841,9 +900,12 @@ export default function AdminDashboard() {
             <form onSubmit={handlePaymentSave} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
               
               <div className="border-b border-slate-100 pb-4 mb-4">
-                <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-4">
-                  <QrCode className="w-5 h-5 text-teal-600" /> Configuração Pix
+                <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-2">
+                  <QrCode className="w-5 h-5 text-teal-600" /> Configuração Pix (Manual)
                 </h3>
+                <p className="text-sm text-slate-500 mb-4">
+                  Esta chave será exibida ao convidado para pagamentos manuais via Pix (Copia e Cola). Confirmações de pagamento Pix manual devem ser verificadas diretamente no seu banco.
+                </p>
                 
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
@@ -909,40 +971,28 @@ export default function AdminDashboard() {
                       className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
                     >
                       <option value="simulated">Simulado (Apenas testes)</option>
-                      <option value="stripe">Stripe</option>
                       <option value="mercadopago">Mercado Pago</option>
-                      <option value="asaas">Asaas</option>
                     </select>
                   </div>
-                  
-                  {paymentForm.gatewayProvider !== 'simulated' && (
-                    <>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Chave Pública (Public Key)</label>
-                        <input 
-                          type="text" 
-                          value={paymentForm.gatewayPublicKey}
-                          onChange={e => setPaymentForm({...paymentForm, gatewayPublicKey: e.target.value})}
-                          className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono text-sm" 
-                          placeholder="pk_test_..."
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">Access Token (Token de Acesso)</label>
-                        <input 
-                          type="password" 
-                          value={paymentForm.gatewayAccessToken}
-                          onChange={e => setPaymentForm({...paymentForm, gatewayAccessToken: e.target.value})}
-                          className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none font-mono text-sm" 
-                          placeholder="APP_USR-..."
-                        />
-                      </div>
-                    </>
-                  )}
                 </div>
-                <p className="text-xs text-slate-500 mt-2">
-                  No modo <strong>Simulado</strong>, os pagamentos aparecerão no extrato como "Concluído" instantaneamente sem cobrar um cartão real.
-                </p>
+                
+                {paymentForm.gatewayProvider === 'mercadopago' && (
+                  <div className="mt-4 p-4 bg-teal-50 border border-teal-100 rounded-lg flex gap-3">
+                    <div className="flex-shrink-0">
+                      <CreditCard className="w-5 h-5 text-teal-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-teal-900">Processamento Centralizado</p>
+                      <p className="text-sm text-teal-700 mt-1">Os pagamentos por cartão são processados pela conta Mercado Pago da plataforma. Não é necessário preencher Access Token ou Public Key nesta versão.</p>
+                    </div>
+                  </div>
+                )}
+                
+                {paymentForm.gatewayProvider === 'simulated' && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    No modo <strong>Simulado</strong>, os pagamentos aparecerão no extrato como "Concluído" instantaneamente sem cobrar um cartão real.
+                  </p>
+                )}
               </div>
 
               <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors">
@@ -1204,30 +1254,27 @@ export default function AdminDashboard() {
 
                     {settingsForm.coverMediaType === 'video' ? (
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">URL do Vídeo (MP4)</label>
-                        <input 
-                          type="url" 
-                          value={settingsForm.coverVideoUrl} 
-                          onChange={e => setSettingsForm({...settingsForm, coverVideoUrl: e.target.value})} 
-                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
-                          placeholder="https://exemplo.com/video.mp4"
+                        <FileUpload 
+                          label="Vídeo de Capa (MP4, WebM)"
+                          bucket="event_assets"
+                          pathPrefix={`hosts/${resolvedHostId}/videos`}
+                          accept="video/mp4,video/webm"
+                          currentUrl={settingsForm.coverVideoUrl}
+                          onUploadSuccess={(url, path) => setSettingsForm({...settingsForm, coverVideoUrl: url, coverVideoStoragePath: path})}
+                          onClear={() => setSettingsForm({...settingsForm, coverVideoUrl: '', coverVideoStoragePath: ''})}
                         />
                       </div>
                     ) : (
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1">URL da Foto de Capa (Hero)</label>
-                        <input 
-                          type="url" 
-                          value={settingsForm.coverImage}
-                          onChange={e => setSettingsForm({...settingsForm, coverImage: e.target.value})}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none mb-3" 
-                          placeholder="https://exemplo.com/foto.jpg"
+                        <FileUpload 
+                          label="Foto de Capa (Hero)"
+                          bucket="event_assets"
+                          pathPrefix={`hosts/${resolvedHostId}/cover`}
+                          accept="image/*"
+                          currentUrl={settingsForm.coverImage}
+                          onUploadSuccess={(url, path) => setSettingsForm({...settingsForm, coverImage: url, coverStoragePath: path})}
+                          onClear={() => setSettingsForm({...settingsForm, coverImage: '', coverStoragePath: ''})}
                         />
-                        {settingsForm.coverImage && (
-                          <div className="relative rounded-lg overflow-hidden border border-slate-200">
-                            <img src={settingsForm.coverImage} alt="Preview" className="w-full h-40 object-cover" />
-                          </div>
-                        )}
                       </div>
                     )}
                     

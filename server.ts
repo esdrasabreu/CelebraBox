@@ -23,14 +23,8 @@ async function startServer() {
     try {
       const { title, price, quantity, giftId, donorName, hostId } = req.body;
       
-      let accessToken = process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
-
-      if (supabase && hostId && hostId !== 'default') {
-        const { data, error } = await supabase.rpc('get_host_access_token', { host_id_param: hostId });
-        if (data && !error) {
-          accessToken = data;
-        }
-      }
+      // Utilize token de plataforma em vez de buscar token do anfitrião
+      const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
 
       if (!accessToken) {
         return res.status(400).json({ error: "Access token is required" });
@@ -38,6 +32,13 @@ async function startServer() {
 
       const client = new MercadoPagoConfig({ accessToken, options: { timeout: 5000 } });
       const preference = new Preference(client);
+
+      let baseUrl = req.get('origin');
+      if (!baseUrl) {
+        let host = req.get('host') || 'localhost:3000';
+        if (host.includes('0.0.0.0')) host = host.replace('0.0.0.0', 'localhost');
+        baseUrl = `${req.protocol}://${host}`;
+      }
 
       const result = await preference.create({
         body: {
@@ -54,12 +55,16 @@ async function startServer() {
             email: "convidado_" + Date.now() + "@testuser.com"
           },
           back_urls: {
-            success: `https://ais-dev-bzwgpc7is6sh4l2odlabnp-269341183985.us-east5.run.app/e/${hostId}/pagamento/sucesso`,
-            failure: `https://ais-dev-bzwgpc7is6sh4l2odlabnp-269341183985.us-east5.run.app/e/${hostId}/pagamento/falha`,
-            pending: `https://ais-dev-bzwgpc7is6sh4l2odlabnp-269341183985.us-east5.run.app/e/${hostId}/pagamento/pendente`
+            success: `${baseUrl}/e/${hostId}/pagamento/sucesso`,
+            failure: `${baseUrl}/e/${hostId}/pagamento/falha`,
+            pending: `${baseUrl}/e/${hostId}/pagamento/pendente`
           },
           auto_return: "approved",
-          statement_descriptor: "PRESENTE"
+          statement_descriptor: "PRESENTE",
+          metadata: {
+            host_id: hostId,
+            gift_id: giftId
+          }
         }
       });
 

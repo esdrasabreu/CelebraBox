@@ -1,6 +1,7 @@
 export type GalleryImage = {
   id: string;
   url: string;
+  storagePath?: string;
   caption?: string;
   order: number;
 };
@@ -26,6 +27,7 @@ export type Gift = {
   description: string;
   price: number;
   imageUrl: string;
+  imageStoragePath?: string;
   category?: string;
   quantity?: number;
 };
@@ -46,12 +48,19 @@ export type Guest = {
 
 export type Transaction = {
   id: string;
+  host_id?: string;
+  gift_id?: string;
+  payment_id?: string;
+  preference_id?: string;
+  external_reference?: string;
   giftTitle: string;
   donorName: string;
   amount: number;
   method: 'PIX' | 'Cartão de Crédito';
   date: string;
   status: 'Concluído' | 'Pendente';
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type PaymentSettings = {
@@ -64,6 +73,17 @@ export type PaymentSettings = {
   gatewayAccessToken?: string;
   gatewayEnvironment: 'sandbox' | 'production';
   gatewayWebhookUrl?: string;
+};
+
+export type PaymentAccount = {
+  platform: string;
+  provider: string;
+  host_id: string;
+  connection_status: 'connected' | 'disconnected';
+  provider_user_id?: string;
+  access_token_reference?: string;
+  refresh_token_reference?: string;
+  connected_at?: string;
 };
 
 export type LocationDetails = {
@@ -88,8 +108,11 @@ export type EventDetails = {
   location: LocationDetails;
   story: string;
   coverImage: string;
+  coverStoragePath?: string;
   coverMediaType?: 'image' | 'video';
   coverVideoUrl?: string;
+  coverVideoStoragePath?: string;
+  coverPosterStoragePath?: string;
   themeColor: string;
   slug?: string;
 };
