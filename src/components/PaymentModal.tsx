@@ -27,6 +27,8 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
 
     try {
       if (paymentSettings.gatewayProvider === 'mercadopago') {
+        const externalRef = `${hostId || 'default'}:${gift.id}:${crypto.randomUUID()}`;
+
         const response = await fetch('/api/create-preference', {
           method: 'POST',
           headers: {
@@ -38,34 +40,28 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
             quantity: 1,
             giftId: gift.id,
             donorName: donorName,
-            hostId: hostId || 'default'
+            hostId: hostId || 'default',
+            externalReference: externalRef
           }),
         });
 
         const data = await response.json();
         
         if (data.init_point) {
-          // Add pending transaction
+          // Add preliminary transaction
           addTransaction({
+            host_id: hostId,
+            gift_id: gift.id,
+            preference_id: data.preference_id,
+            external_reference: externalRef,
             giftTitle: gift.title,
             donorName,
             amount: gift.price,
-            method: 'PIX', // Defaults to PIX or generic
-            status: 'Pendente'
+            method: 'Aguardando',
+            status: 'checkout_started'
           });
 
-          // Optimistically decrement quantity
-          if (gift.quantity !== undefined && gift.quantity > 0) {
-            updateGift(gift.id, { 
-              title: gift.title,
-              description: gift.description,
-              price: gift.price,
-              imageUrl: gift.imageUrl,
-              category: gift.category,
-              quantity: gift.quantity - 1 
-            });
-          }
-
+          // Redirect to checkout
           window.location.href = data.init_point;
         } else {
           throw new Error('Falha ao gerar link de pagamento.');
@@ -73,12 +69,16 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
       } else {
         // Simulated flow
         setTimeout(() => {
+          const externalRef = `${hostId || 'default'}:${gift.id}:${crypto.randomUUID()}`;
           addTransaction({
+            host_id: hostId,
+            gift_id: gift.id,
+            external_reference: externalRef,
             giftTitle: gift.title,
             donorName,
             amount: gift.price,
             method: 'PIX',
-            status: 'Concluído'
+            status: 'approved'
           });
 
           if (gift.quantity !== undefined && gift.quantity > 0) {
@@ -132,16 +132,16 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
               <div className="mb-6">
                 <p className="text-slate-500 text-sm mb-1">Item escolhido:</p>
                 <p className="text-lg font-semibold text-slate-800">{gift.title}</p>
-                <p className="text-teal-600 font-bold">R$ {gift.price.toFixed(2)}</p>
+                <p className="text-[#ef007e] font-bold">R$ {gift.price.toFixed(2)}</p>
               </div>
 
-              <div className="mb-6 bg-teal-50 border border-teal-100 rounded-lg p-3 flex items-start gap-3">
-                <ShieldCheck className="w-5 h-5 text-teal-600 shrink-0 mt-0.5" />
+              <div className="mb-6 bg-pink-50 border border-pink-100 rounded-lg p-3 flex items-start gap-3">
+                <ShieldCheck className="w-5 h-5 text-[#ef007e] shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs text-teal-800 font-medium mb-1">Pagamento seguro destinado a:</p>
-                  <p className="text-sm font-bold text-teal-900">{paymentSettings.receiverName}</p>
+                  <p className="text-xs text-pink-900 font-medium mb-1">Pagamento seguro destinado a:</p>
+                  <p className="text-sm font-bold text-[#b8005b]">{paymentSettings.receiverName}</p>
                   {paymentSettings.gatewayProvider === 'mercadopago' && (
-                    <p className="text-xs text-teal-700 opacity-80 mt-1">Processado em ambiente seguro pelo Mercado Pago</p>
+                    <p className="text-xs text-pink-700 opacity-90 mt-1">Processado em ambiente seguro pelo Mercado Pago</p>
                   )}
                 </div>
               </div>
@@ -161,7 +161,7 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
                     required
                     value={donorName}
                     onChange={(e) => setDonorName(e.target.value)}
-                    className="w-full pl-9 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-sm"
+                    className="w-full pl-9 pr-3 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#ef007e] text-sm"
                     placeholder="Nome completo"
                   />
                 </div>
@@ -177,7 +177,7 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
               <button
                 type="submit"
                 disabled={isProcessing}
-                className="w-full py-3.5 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-70"
+                className="w-full py-3.5 bg-[#ef007e] text-white rounded-lg font-medium hover:bg-[#d9006f] transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-70 shadow-pink-200"
               >
                 {isProcessing ? (
                   <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>

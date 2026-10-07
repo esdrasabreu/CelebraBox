@@ -51,14 +51,14 @@ export default function Login() {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-white">
       {/* Left Column - Image/Brand */}
-      <div className="md:w-1/2 relative bg-rose-50 overflow-hidden flex flex-col justify-center items-center p-12 lg:p-20">
+      <div className="md:w-1/2 relative bg-pink-50 overflow-hidden flex flex-col justify-center items-center p-12 lg:p-20">
         <div className="absolute inset-0">
           <img 
             src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=80" 
             alt="Celebração" 
             className="w-full h-full object-cover opacity-20 mix-blend-multiply"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-rose-100/90 via-rose-50/50 to-transparent"></div>
+          <div className="absolute inset-0 bg-gradient-to-t from-pink-100/90 via-pink-50/50 to-transparent"></div>
         </div>
         
         <div className="relative z-10 w-full max-w-md text-center md:text-left">
@@ -67,10 +67,10 @@ export default function Login() {
             animate={{ opacity: 1, y: 0 }}
             className="flex items-center justify-center md:justify-start gap-3 mb-8"
           >
-            <div className="w-12 h-12 bg-rose-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-rose-200">
+            <div className="w-12 h-12 bg-[#ef007e] rounded-xl flex items-center justify-center text-white shadow-lg shadow-pink-200">
               <Gift className="w-7 h-7" />
             </div>
-            <h1 className="text-4xl font-serif font-bold text-slate-900 tracking-tight">Celebra<span className="text-rose-600">Box</span></h1>
+            <h1 className="text-4xl font-serif font-bold text-slate-900 tracking-tight">Celebra<span className="text-[#ef007e]">Box</span></h1>
           </motion.div>
           
           <motion.div
@@ -87,15 +87,15 @@ export default function Login() {
             
             <div className="space-y-4">
               <div className="flex items-center gap-3 text-slate-700">
-                <Heart className="w-5 h-5 text-rose-500" />
+                <Heart className="w-5 h-5 text-[#ef007e]" />
                 <span>Templates elegantes e modernos</span>
               </div>
               <div className="flex items-center gap-3 text-slate-700">
-                <Gift className="w-5 h-5 text-rose-500" />
+                <Gift className="w-5 h-5 text-[#ef007e]" />
                 <span>Lista de presentes e Pix integrados</span>
               </div>
               <div className="flex items-center gap-3 text-slate-700">
-                <Sparkles className="w-5 h-5 text-rose-500" />
+                <Sparkles className="w-5 h-5 text-[#ef007e]" />
                 <span>Painel completo de convidados e recados</span>
               </div>
             </div>
@@ -128,7 +128,7 @@ export default function Login() {
                   required
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 focus:outline-none transition-all shadow-sm"
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#ef007e] focus:border-[#ef007e] focus:outline-none transition-all shadow-sm"
                   placeholder="Seu nome"
                   disabled={loading}
                 />
@@ -142,7 +142,7 @@ export default function Login() {
                 required
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 focus:outline-none transition-all shadow-sm"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#ef007e] focus:border-[#ef007e] focus:outline-none transition-all shadow-sm"
                 placeholder="seu@email.com"
                 disabled={loading}
               />
@@ -155,7 +155,7 @@ export default function Login() {
                 required
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:border-rose-500 focus:outline-none transition-all shadow-sm"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#ef007e] focus:border-[#ef007e] focus:outline-none transition-all shadow-sm"
                 placeholder="••••••••"
                 disabled={loading}
               />
@@ -164,7 +164,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className={`w-full py-3.5 bg-rose-600 text-white rounded-xl font-medium transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 ${loading ? 'opacity-70 cursor-not-allowed' : 'hover:bg-rose-700 hover:shadow-xl hover:shadow-rose-300 transform hover:-translate-y-0.5'}`}
+              className={`w-full py-3.5 bg-[#ef007e] text-white rounded-xl font-medium transition-all shadow-lg shadow-pink-200 flex items-center justify-center gap-2 ${loading ? 'opacity-70 cursor-not-allowed' : 'hover:bg-[#d9006f] hover:shadow-xl hover:shadow-pink-300 transform hover:-translate-y-0.5'}`}
             >
               {loading ? (
                 'Processando...'
@@ -187,7 +187,7 @@ export default function Login() {
                   setEmail('');
                   setPassword('');
                 }}
-                className="ml-2 text-rose-600 font-semibold hover:text-rose-700 transition-colors"
+                className="ml-2 text-[#ef007e] font-semibold hover:text-[#d9006f] transition-colors"
                 disabled={loading}
               >
                 {isLogin ? 'Criar agora' : 'Fazer login'}

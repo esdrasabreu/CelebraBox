@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "CelebraBox - Painel e Site de Eventos",
+  "description": "Plataforma completa de gestão e site para eventos, com lista de presentes, confirmação de presença, galeria imersiva e paleta rosa fúcsia.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

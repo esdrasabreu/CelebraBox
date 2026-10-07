@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { MercadoPagoConfig, Preference } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 
@@ -21,7 +21,7 @@ async function startServer() {
   // API Route for Mercado Pago Preference
   app.post("/api/create-preference", async (req, res) => {
     try {
-      const { title, price, quantity, giftId, donorName, hostId } = req.body;
+      const { title, price, quantity, giftId, donorName, hostId, externalReference } = req.body;
       
       // Utilize token de plataforma em vez de buscar token do anfitrião
       const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
@@ -59,8 +59,15 @@ async function startServer() {
             failure: `${baseUrl}/e/${hostId}/pagamento/falha`,
             pending: `${baseUrl}/e/${hostId}/pagamento/pendente`
           },
+          payment_methods: {
+            installments: 12,
+            excluded_payment_types: [],
+            excluded_payment_methods: []
+          },
           auto_return: "approved",
           statement_descriptor: "PRESENTE",
+          external_reference: externalReference,
+          notification_url: `${baseUrl}/api/webhook/mercadopago`,
           metadata: {
             host_id: hostId,
             gift_id: giftId
@@ -68,10 +75,64 @@ async function startServer() {
         }
       });
 
-      res.json({ init_point: result.init_point });
+      res.json({ init_point: result.init_point, preference_id: result.id });
     } catch (error) {
       console.error("Error creating preference:", error);
       res.status(500).json({ error: "Failed to create preference" });
+    }
+  });
+
+  app.post("/api/webhook/mercadopago", async (req, res) => {
+    try {
+      const { type, data } = req.body;
+      const action = req.body.action || req.query.topic;
+
+      if (type === 'payment' || action === 'payment') {
+        const paymentId = data?.id || req.query.id;
+        if (!paymentId) return res.status(400).json({ error: 'Missing payment ID' });
+
+        const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
+        const client = new MercadoPagoConfig({ accessToken, options: { timeout: 5000 } });
+        const paymentClient = new Payment(client);
+        
+        const paymentInfo = await paymentClient.get({ id: paymentId });
+
+        if (paymentInfo) {
+          const status = paymentInfo.status;
+          const externalReference = paymentInfo.external_reference;
+          const paymentMethodId = paymentInfo.payment_method_id;
+          const paymentTypeId = paymentInfo.payment_type_id;
+          
+          let normalizedStatus = status;
+          if (status === 'approved') normalizedStatus = 'approved';
+          else if (status === 'rejected') normalizedStatus = 'rejected';
+          else if (status === 'pending') normalizedStatus = 'pending';
+          else if (status === 'in_process') normalizedStatus = 'in_process';
+          else if (status === 'cancelled') normalizedStatus = 'cancelled';
+          else if (status === 'refunded') normalizedStatus = 'refunded';
+
+          let methodFriendly = 'Outro';
+          if (paymentMethodId === 'pix') methodFriendly = 'PIX';
+          else if (paymentTypeId === 'credit_card') methodFriendly = 'Cartão de Crédito';
+          else if (paymentTypeId === 'debit_card') methodFriendly = 'Cartão de Débito';
+          else if (paymentTypeId === 'ticket') methodFriendly = 'Boleto';
+
+          if (supabase && externalReference) {
+            await supabase.from('transactions')
+              .update({ 
+                status: normalizedStatus,
+                method: methodFriendly,
+                payment_id: String(paymentId)
+              })
+              .eq('external_reference', externalReference);
+          }
+        }
+      }
+
+      res.status(200).send('OK');
+    } catch (error) {
+      console.error('Error processing webhook:', error);
+      res.status(500).json({ error: 'Webhook processing failed' });
     }
   });
 

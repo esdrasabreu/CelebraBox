@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
-import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt, UploadCloud } from 'lucide-react';
+import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt, UploadCloud, Menu, X, Check, ChevronRight, Sparkles } from 'lucide-react';
 import { useAppContext } from '../lib/AppContext';
 import { useAuth } from '../lib/AuthContext';
 import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
@@ -22,11 +22,44 @@ export default function AdminDashboard() {
   } = useAppContext();
   
   const [activeTab, setActiveTab] = useState<'overview' | 'rsvp' | 'gifts-catalog' | 'finance' | 'payments-config' | 'settings' | 'gallery' | 'schedule' | 'expenses'>('overview');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const mainContentRef = React.useRef<HTMLElement>(null);
+
+  const navTabs = [
+    { id: 'overview', label: 'Visão Geral', icon: LayoutDashboard },
+    { id: 'rsvp', label: 'Convidados', icon: Users },
+    { id: 'gifts-catalog', label: 'Lista de Presentes', icon: Gift },
+    { id: 'gallery', label: 'Galeria de Fotos', icon: ImageIcon },
+    { id: 'schedule', label: 'Cronograma', icon: Clock },
+    { id: 'finance', label: 'Arrecadação', icon: DollarSign },
+    { id: 'expenses', label: 'Gastos', icon: Receipt },
+    { id: 'payments-config', label: 'Recebimentos', icon: QrCode },
+    { id: 'settings', label: 'Configurações', icon: Settings },
+  ] as const;
+
+  const currentTab = navTabs.find(t => t.id === activeTab) || navTabs[0];
+  const CurrentIcon = currentTab.icon;
+
+  const handleSelectTab = (tabId: typeof activeTab) => {
+    setActiveTab(tabId);
+    setIsMobileMenuOpen(false);
+    
+    // Auto scroll directly to the content on mobile & desktop
+    setTimeout(() => {
+      const el = document.getElementById('admin-content-view');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else if (mainContentRef.current) {
+        mainContentRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 60);
+  };
 
   // Financial calculations
-  const totalArrecadado = transactions.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalPix = transactions.filter(t => t.method === 'PIX').reduce((acc, curr) => acc + curr.amount, 0);
-  const totalCartao = transactions.filter(t => t.method === 'Cartão de Crédito').reduce((acc, curr) => acc + curr.amount, 0);
+  const approvedTransactions = transactions.filter(t => t.status === 'approved' || t.status === 'Concluído');
+  const totalArrecadado = approvedTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+  const totalPix = approvedTransactions.filter(t => t.method === 'PIX').reduce((acc, curr) => acc + curr.amount, 0);
+  const totalCartao = approvedTransactions.filter(t => t.method === 'Cartão de Crédito').reduce((acc, curr) => acc + curr.amount, 0);
   const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
 
   // GUESTS STATE
@@ -316,69 +349,181 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-      {/* Sidebar */}
-      <aside className="w-full md:w-64 bg-slate-900 text-slate-300 flex flex-col">
-        <div className="p-6">
-          <h1 className="text-xl font-bold text-white mb-1">Painel do Evento</h1>
-          <p className="text-xs text-slate-500 truncate">{eventDetails.title}</p>
+      {/* Mobile Sticky Navigation Header with Retractable Drawer */}
+      <div className="md:hidden sticky top-0 z-40 bg-slate-900 border-b border-slate-800 shadow-md">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <div className="w-8 h-8 rounded-lg bg-[#ef007e] flex items-center justify-center text-white shrink-0 shadow-sm shadow-pink-500/30">
+              <CurrentIcon className="w-4 h-4" />
+            </div>
+            <div className="overflow-hidden">
+              <h1 className="text-sm font-bold text-white truncate">Painel do Evento</h1>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-pink-400 font-semibold uppercase tracking-wider">Seção:</span>
+                <span className="text-xs font-semibold text-white truncate">{currentTab.label}</span>
+              </div>
+            </div>
+          </div>
+
+          <button 
+            type="button"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 text-slate-200 hover:text-white hover:bg-slate-700 text-xs font-medium transition-colors border border-slate-700"
+            aria-label="Abrir ou fechar menu"
+          >
+            {isMobileMenuOpen ? (
+              <>
+                <X className="w-4 h-4 text-[#ef007e]" />
+                <span className="text-[#ef007e] font-semibold">Fechar</span>
+              </>
+            ) : (
+              <>
+                <Menu className="w-4 h-4 text-white" />
+                <span>Menu</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Retractable Dropdown Menu on Mobile */}
+        {isMobileMenuOpen && (
+          <div className="border-t border-slate-800 bg-slate-900/98 backdrop-blur-md px-3 py-3 space-y-1 shadow-2xl animate-in slide-in-from-top-2 duration-200">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-3 py-1">
+              Navegar pelas seções
+            </div>
+            {navTabs.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleSelectTab(tab.id)}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                    isActive 
+                      ? 'bg-[#ef007e] text-white font-semibold shadow-md shadow-pink-600/30' 
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                    <span>{tab.label}</span>
+                  </div>
+                  {isActive && <Check className="w-4 h-4 text-white" />}
+                </button>
+              );
+            })}
+
+            <div className="pt-2 mt-2 border-t border-slate-800 flex items-center justify-between px-2 text-xs">
+              <a 
+                href={`/e/${eventDetails.slug || resolvedHostId}`} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="text-pink-400 hover:text-pink-300 py-1.5 flex items-center gap-1 font-medium"
+              >
+                Ver Site Público
+                <ChevronRight className="w-3.5 h-3.5" />
+              </a>
+              <button onClick={logout} className="text-red-400 hover:text-red-300 py-1.5 font-medium">
+                Sair
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Horizontal Fast Tab Pill Switcher on Mobile */}
+        <div className="flex overflow-x-auto gap-1.5 px-3 py-2 bg-slate-950/80 border-t border-slate-800/80 no-scrollbar">
+          {navTabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs shrink-0 whitespace-nowrap transition-all ${
+                  isActive
+                    ? 'bg-[#ef007e] text-white font-semibold shadow-xs shadow-pink-600/30'
+                    : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden md:flex w-64 bg-slate-900 text-slate-300 flex-col shrink-0 min-h-screen border-r border-slate-800">
+        <div className="p-6 border-b border-slate-800">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#ef007e] animate-pulse"></span>
+            <h1 className="text-lg font-bold text-white tracking-tight">Painel do Evento</h1>
+          </div>
+          <p className="text-xs text-pink-300/80 truncate font-medium">{eventDetails.title}</p>
         </div>
         
-        <nav className="flex-1 px-4 space-y-2 overflow-y-auto pb-4">
-          <button onClick={() => setActiveTab('overview')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'overview' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <LayoutDashboard className="w-5 h-5" />
-            <span className="font-medium">Visão Geral</span>
-          </button>
-          <button onClick={() => setActiveTab('rsvp')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'rsvp' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <Users className="w-5 h-5" />
-            <span className="font-medium">Convidados</span>
-          </button>
-          <button onClick={() => setActiveTab('gifts-catalog')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'gifts-catalog' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <Gift className="w-5 h-5" />
-            <span className="font-medium">Lista de Presentes</span>
-          </button>
-          <button onClick={() => setActiveTab('gallery')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'gallery' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <ImageIcon className="w-5 h-5" />
-            <span className="font-medium">Galeria de Fotos</span>
-          </button>
-          <button onClick={() => setActiveTab('schedule')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'schedule' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <Clock className="w-5 h-5" />
-            <span className="font-medium">Cronograma</span>
-          </button>
-          <button onClick={() => setActiveTab('finance')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'finance' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <DollarSign className="w-5 h-5" />
-            <span className="font-medium">Arrecadação</span>
-          </button>
-          <button onClick={() => setActiveTab('expenses')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'expenses' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <Receipt className="w-5 h-5" />
-            <span className="font-medium">Gastos</span>
-          </button>
-          <button onClick={() => setActiveTab('payments-config')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'payments-config' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <QrCode className="w-5 h-5" />
-            <span className="font-medium">Recebimentos</span>
-          </button>
-          <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-teal-600/20 text-teal-400' : 'hover:bg-slate-800 hover:text-white'}`}>
-            <Settings className="w-5 h-5" />
-            <span className="font-medium">Configurações</span>
-          </button>
+        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
+          {navTabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectTab(tab.id)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-all ${
+                  isActive 
+                    ? 'bg-[#ef007e]/15 text-[#ef007e] font-semibold border-l-3 border-[#ef007e]' 
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-[#ef007e]' : 'text-slate-400'}`} />
+                  <span>{tab.label}</span>
+                </div>
+                {isActive && <div className="w-1.5 h-1.5 rounded-full bg-[#ef007e]"></div>}
+              </button>
+            );
+          })}
         </nav>
 
-        <div className="p-4 border-t border-slate-800 mt-auto">
-          <div className="mb-2 text-xs text-slate-500 px-4">
+        <div className="p-4 border-t border-slate-800 mt-auto bg-slate-950/40">
+          <div className="mb-2 text-xs text-slate-500 px-3">
             Logado como: <span className="text-slate-300 font-medium">{host?.name}</span>
           </div>
-          <a href={`/e/${eventDetails.slug || resolvedHostId}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
-            <LayoutDashboard className="w-4 h-4" />
-            <span className="font-medium text-sm">Ver Site Público</span>
+          <a href={`/e/${eventDetails.slug || resolvedHostId}`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-sm font-medium">
+            <LayoutDashboard className="w-4 h-4 text-pink-400" />
+            <span>Ver Site Público</span>
           </a>
-          <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors mt-1">
+          <button onClick={logout} className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-sm font-medium mt-1">
             <LogOut className="w-4 h-4" />
-            <span className="font-medium text-sm">Sair</span>
+            <span>Sair</span>
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto">
+      {/* Main Content Area with Feedback Signals */}
+      <main id="admin-content-view" ref={mainContentRef} className="flex-1 p-4 sm:p-6 md:p-10 overflow-y-auto">
+        {/* Mobile Section Indicator Banner (Signals clearly which section was loaded) */}
+        <div className="md:hidden flex items-center justify-between p-3.5 mb-6 bg-pink-50 border border-pink-200/80 rounded-2xl shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-[#ef007e] text-white rounded-xl shadow-xs">
+              <CurrentIcon className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-pink-700 block">
+                Seção Ativa
+              </span>
+              <span className="text-sm font-bold text-slate-900">{currentTab.label}</span>
+            </div>
+          </div>
+          <span className="text-xs font-semibold text-[#ef007e] bg-white px-2.5 py-1 rounded-full border border-pink-200">
+            Visualizando
+          </span>
+        </div>
         
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
@@ -391,14 +536,14 @@ export default function AdminDashboard() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <Users className="w-5 h-5 text-teal-600" />
+                  <Users className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Convidados Confirmados</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">{guests.filter(g => g.status === 'Confirmado').length} <span className="text-sm font-normal text-slate-500">/ {guests.length}</span></div>
               </div>
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <DollarSign className="w-5 h-5 text-teal-600" />
+                  <DollarSign className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Arrecadação Total</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">R$ {totalArrecadado.toFixed(2)}</div>
@@ -416,7 +561,7 @@ export default function AdminDashboard() {
               </div>
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <Gift className="w-5 h-5 text-teal-600" />
+                  <Gift className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Presentes Recebidos</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">{transactions.length}</div>
@@ -450,7 +595,7 @@ export default function AdminDashboard() {
                       <span className="font-medium">{guests.filter(g => g.status === 'Confirmado').length}</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2">
-                      <div className="bg-teal-500 h-2 rounded-full" style={{ width: `${guests.length ? (guests.filter(g => g.status === 'Confirmado').length / guests.length) * 100 : 0}%` }}></div>
+                      <div className="bg-pink-500 h-2 rounded-full" style={{ width: `${guests.length ? (guests.filter(g => g.status === 'Confirmado').length / guests.length) * 100 : 0}%` }}></div>
                     </div>
                   </div>
                   <div>
@@ -493,21 +638,21 @@ export default function AdminDashboard() {
                     multiple 
                     accept="image/*"
                     onChange={handleMultiUpload}
-                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 cursor-pointer"
+                    className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-[#d9006f] hover:file:bg-pink-100 cursor-pointer"
                   />
                 </div>
               </div>
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">URL (Alternativa)</label>
-                <input type="url" value={galleryForm.url} onChange={e => setGalleryForm({...galleryForm, url: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="https://..." />
+                <input type="url" value={galleryForm.url} onChange={e => setGalleryForm({...galleryForm, url: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="https://..." />
               </div>
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Legenda (Opcional)</label>
-                <input type="text" value={galleryForm.caption} onChange={e => setGalleryForm({...galleryForm, caption: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Nosso primeiro encontro" />
+                <input type="text" value={galleryForm.caption} onChange={e => setGalleryForm({...galleryForm, caption: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Nosso primeiro encontro" />
               </div>
               <div className="w-full md:w-32">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Ordem</label>
-                <input type="number" value={galleryForm.order} onChange={e => setGalleryForm({...galleryForm, order: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" />
+                <input type="number" value={galleryForm.order} onChange={e => setGalleryForm({...galleryForm, order: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" />
               </div>
               <button type="submit" className="w-full md:w-auto bg-slate-800 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors">
                 {isEditingGallery ? 'Salvar Edição' : 'Adicionar'}
@@ -522,7 +667,7 @@ export default function AdminDashboard() {
                   <img src={img.url} alt={img.caption || 'Foto da galeria'} className="w-full h-40 object-cover" />
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
                     <div className="flex justify-end gap-1">
-                      <button onClick={() => handleEditGallery(img)} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-teal-50 hover:text-teal-600"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => handleEditGallery(img)} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-pink-50 hover:text-[#ef007e]"><Edit className="w-4 h-4" /></button>
                       <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteGalleryImage(img.id) } }) }} className="p-1.5 bg-white text-slate-800 rounded-md hover:bg-red-50 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     </div>
                     {img.caption && <p className="text-white text-xs truncate drop-shadow-md">{img.caption}</p>}
@@ -543,15 +688,15 @@ export default function AdminDashboard() {
             <form onSubmit={handleScheduleSubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
               <div className="w-full md:w-32">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Horário</label>
-                <input required type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" />
+                <input required type="time" value={scheduleForm.time} onChange={e => setScheduleForm({...scheduleForm, time: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" />
               </div>
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Título</label>
-                <input required type="text" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Cerimônia" />
+                <input required type="text" value={scheduleForm.title} onChange={e => setScheduleForm({...scheduleForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Cerimônia" />
               </div>
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Descrição</label>
-                <input type="text" value={scheduleForm.description} onChange={e => setScheduleForm({...scheduleForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Opcional" />
+                <input type="text" value={scheduleForm.description} onChange={e => setScheduleForm({...scheduleForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Opcional" />
               </div>
               <button type="submit" className="w-full md:w-auto bg-slate-800 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors">
                 {isEditingSchedule ? 'Salvar Edição' : 'Adicionar'}
@@ -578,7 +723,7 @@ export default function AdminDashboard() {
                         {item.description && <div className="text-slate-500 text-xs mt-0.5">{item.description}</div>}
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleEditSchedule(item)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleEditSchedule(item)} className="p-1 text-slate-400 hover:text-[#ef007e] transition-colors mx-1"><Edit className="w-4 h-4" /></button>
                         <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteScheduleItem(item.id) } }) }} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
                       </td>
                     </tr>
@@ -605,19 +750,19 @@ export default function AdminDashboard() {
             <form onSubmit={handleExpenseSubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Fornecedor / Item</label>
-                <input required type="text" value={expenseForm.title} onChange={e => setExpenseForm({...expenseForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Fotógrafo" />
+                <input required type="text" value={expenseForm.title} onChange={e => setExpenseForm({...expenseForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Fotógrafo" />
               </div>
               <div className="w-full md:w-32">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Valor (R$)</label>
-                <input required type="number" step="0.01" min="0" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="0.00" />
+                <input required type="number" step="0.01" min="0" value={expenseForm.amount} onChange={e => setExpenseForm({...expenseForm, amount: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="0.00" />
               </div>
               <div className="w-full md:w-40">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Vencimento</label>
-                <input required type="date" value={expenseForm.date} onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" />
+                <input required type="date" value={expenseForm.date} onChange={e => setExpenseForm({...expenseForm, date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" />
               </div>
               <div className="w-full md:w-32">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                <select value={expenseForm.status} onChange={e => setExpenseForm({...expenseForm, status: e.target.value as ExpenseItem['status']})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm bg-white">
+                <select value={expenseForm.status} onChange={e => setExpenseForm({...expenseForm, status: e.target.value as ExpenseItem['status']})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm bg-white">
                   <option value="Pendente">Pendente</option>
                   <option value="Pago">Pago</option>
                 </select>
@@ -652,7 +797,7 @@ export default function AdminDashboard() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button onClick={() => handleEditExpense(exp)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleEditExpense(exp)} className="p-1 text-slate-400 hover:text-[#ef007e] transition-colors mx-1"><Edit className="w-4 h-4" /></button>
                         <button onClick={() => deleteExpense(exp.id)} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
                       </td>
                     </tr>
@@ -679,11 +824,11 @@ export default function AdminDashboard() {
             <form onSubmit={handleGuestSubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Nome Completo</label>
-                <input required type="text" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Maria da Silva" />
+                <input required type="text" value={guestForm.name} onChange={e => setGuestForm({...guestForm, name: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Maria da Silva" />
               </div>
               <div className="w-full md:w-48">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Status (Manual)</label>
-                <select value={guestForm.status} onChange={e => setGuestForm({...guestForm, status: e.target.value as Guest['status']})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm bg-white">
+                <select value={guestForm.status} onChange={e => setGuestForm({...guestForm, status: e.target.value as Guest['status']})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm bg-white">
                   <option value="Pendente">Pendente</option>
                   <option value="Confirmado">Confirmado</option>
                   <option value="Não vai">Não vai</option>
@@ -732,8 +877,8 @@ export default function AdminDashboard() {
     const url = `${window.location.origin}/e/${slugOrId}?code=${guest.confirmationCode || ''}#rsvp`;
     navigator.clipboard.writeText(url);
     toast.success('Link copiado!');
-  }} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1" title="Copiar Link RSVP"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>
-  <button onClick={() => handleEditGuest(guest)} className="p-1 text-slate-400 hover:text-teal-600 transition-colors mx-1"><Edit className="w-4 h-4" /></button>
+  }} className="p-1 text-slate-400 hover:text-[#ef007e] transition-colors mx-1" title="Copiar Link RSVP"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>
+  <button onClick={() => handleEditGuest(guest)} className="p-1 text-slate-400 hover:text-[#ef007e] transition-colors mx-1"><Edit className="w-4 h-4" /></button>
                           <button onClick={() => { toast('Confirmar exclusão?', { action: { label: 'Sim, Excluir', onClick: () => deleteGuest(guest.id) } }) }} className="p-1 text-slate-400 hover:text-red-600 transition-colors mx-1"><Trash2 className="w-4 h-4" /></button>
                         </td>
                       </tr>
@@ -769,35 +914,35 @@ export default function AdminDashboard() {
                   />
                   <div className="mt-2 flex items-center gap-2">
                     <span className="text-xs text-slate-400">Ou informe a URL manualmente:</span>
-                    <input type="url" value={giftForm.imageUrl} onChange={e => setGiftForm({...giftForm, imageUrl: e.target.value})} className="flex-1 px-3 py-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-teal-500 focus:outline-none text-xs" placeholder="https://..." />
+                    <input type="url" value={giftForm.imageUrl} onChange={e => setGiftForm({...giftForm, imageUrl: e.target.value})} className="flex-1 px-3 py-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-[#ef007e] focus:outline-none text-xs" placeholder="https://..." />
                   </div>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Título</label>
-                  <input required type="text" value={giftForm.title} onChange={e => setGiftForm({...giftForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Cota da Lua de Mel" />
+                  <input required type="text" value={giftForm.title} onChange={e => setGiftForm({...giftForm, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Cota da Lua de Mel" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Valor Sugerido (R$)</label>
-                  <input required type="number" step="0.01" min="0" value={giftForm.price} onChange={e => setGiftForm({...giftForm, price: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="150.00" />
+                  <input required type="number" step="0.01" min="0" value={giftForm.price} onChange={e => setGiftForm({...giftForm, price: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="150.00" />
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-xs font-medium text-slate-500 mb-1">Descrição</label>
-                  <input required type="text" value={giftForm.description} onChange={e => setGiftForm({...giftForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Mensagem para convencer o convidado..." />
+                  <input required type="text" value={giftForm.description} onChange={e => setGiftForm({...giftForm, description: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Mensagem para convencer o convidado..." />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Categoria (Opcional)</label>
-                  <input type="text" value={giftForm.category} onChange={e => setGiftForm({...giftForm, category: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: Viagem, Casa" />
+                  <input type="text" value={giftForm.category} onChange={e => setGiftForm({...giftForm, category: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: Viagem, Casa" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">Quantidade (Opcional)</label>
-                  <input type="number" min="1" value={giftForm.quantity} onChange={e => setGiftForm({...giftForm, quantity: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none text-sm" placeholder="Ex: 5" />
+                  <input type="number" min="1" value={giftForm.quantity} onChange={e => setGiftForm({...giftForm, quantity: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none text-sm" placeholder="Ex: 5" />
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 {isEditingGift && (
                   <button type="button" onClick={() => { setIsEditingGift(false); setGiftForm({ id: '', title: '', description: '', price: '', imageUrl: '', imageStoragePath: '', category: '', quantity: '' }) }} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300">Cancelar</button>
                 )}
-                <button type="submit" className="px-6 py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 shadow-sm">
+                <button type="submit" className="px-6 py-2 bg-[#ef007e] text-white rounded-lg text-sm font-medium hover:bg-[#d9006f] shadow-sm">
                   {isEditingGift ? 'Salvar Alterações' : 'Criar Presente'}
                 </button>
               </div>
@@ -810,13 +955,13 @@ export default function AdminDashboard() {
                 <div key={g.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                   <img src={g.imageUrl} alt={g.title} className="w-full h-32 object-cover" />
                   <div className="p-4 flex flex-col flex-1">
-                    {g.category && <span className="text-xs text-teal-600 font-semibold uppercase mb-1">{g.category}</span>}
+                    {g.category && <span className="text-xs text-[#ef007e] font-semibold uppercase mb-1">{g.category}</span>}
                     <h4 className="font-semibold text-slate-800">{g.title} {g.quantity !== undefined ? <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {g.quantity}</span> : null}</h4>
                     <p className="text-sm text-slate-500 truncate mb-2">{g.description}</p>
                     <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-100">
                       <span className="font-bold text-slate-700">R$ {g.price.toFixed(2)}</span>
                       <div className="flex gap-2">
-                        <button onClick={() => handleEditGift(g)} className="p-1.5 text-slate-500 hover:text-teal-600 hover:bg-teal-50 rounded"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleEditGift(g)} className="p-1.5 text-slate-500 hover:text-[#ef007e] hover:bg-pink-50 rounded"><Edit className="w-4 h-4" /></button>
                         <button onClick={() => deleteGift(g.id)} className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     </div>
@@ -838,21 +983,21 @@ export default function AdminDashboard() {
             <div className="grid sm:grid-cols-3 gap-4">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <DollarSign className="w-5 h-5 text-teal-600" />
+                  <DollarSign className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Total Arrecadado</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">R$ {totalArrecadado.toFixed(2)}</div>
               </div>
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <QrCode className="w-5 h-5 text-teal-600" />
+                  <QrCode className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Via PIX</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">R$ {totalPix.toFixed(2)}</div>
               </div>
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center gap-3 text-slate-500 mb-2">
-                  <CreditCard className="w-5 h-5 text-teal-600" />
+                  <CreditCard className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Via Cartão</span>
                 </div>
                 <div className="text-3xl font-bold text-slate-800">R$ {totalCartao.toFixed(2)}</div>
@@ -871,15 +1016,34 @@ export default function AdminDashboard() {
                   <div key={tx.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-100 gap-4">
                     <div>
                       <p className="font-medium text-slate-800">{tx.donorName}</p>
-                      <p className="text-sm text-slate-500">Presenteou: {tx.giftTitle}</p>
+                      <p className="text-sm text-slate-500">Presente: {tx.giftTitle}</p>
                       <p className="text-xs text-slate-400 mt-1">
                         {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(tx.date))}
                       </p>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 text-right">
                       <div className="flex flex-col items-end">
-                        <span className="font-bold text-teal-700">R$ {tx.amount.toFixed(2)}</span>
-                        <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-0.5 rounded mt-1">{tx.method}</span>
+                        <span className="font-bold text-[#d9006f]">R$ {tx.amount.toFixed(2)}</span>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-0.5 rounded">{tx.method}</span>
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                            tx.status === 'approved' || tx.status === 'Concluído' ? 'bg-pink-100 text-[#d9006f]' :
+                            tx.status === 'pending' || tx.status === 'in_process' || tx.status === 'Pendente' ? 'bg-amber-100 text-amber-700' :
+                            tx.status === 'checkout_started' ? 'bg-blue-100 text-blue-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {
+                              tx.status === 'checkout_started' ? 'Checkout Iniciado' :
+                              tx.status === 'pending' ? 'Aguardando Pagamento' :
+                              tx.status === 'in_process' ? 'Em Análise' :
+                              tx.status === 'approved' ? 'Aprovado' :
+                              tx.status === 'rejected' ? 'Recusado' :
+                              tx.status === 'cancelled' ? 'Cancelado' :
+                              tx.status === 'refunded' ? 'Estornado' :
+                              tx.status === 'expired' ? 'Expirado' : tx.status
+                            }
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -901,7 +1065,7 @@ export default function AdminDashboard() {
               
               <div className="border-b border-slate-100 pb-4 mb-4">
                 <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                  <QrCode className="w-5 h-5 text-teal-600" /> Configuração Pix (Manual)
+                  <QrCode className="w-5 h-5 text-[#ef007e]" /> Configuração Pix (Manual)
                 </h3>
                 <p className="text-sm text-slate-500 mb-4">
                   Esta chave será exibida ao convidado para pagamentos manuais via Pix (Copia e Cola). Confirmações de pagamento Pix manual devem ser verificadas diretamente no seu banco.
@@ -913,7 +1077,7 @@ export default function AdminDashboard() {
                     <select 
                       value={paymentForm.pixKeyType}
                       onChange={e => setPaymentForm({...paymentForm, pixKeyType: e.target.value as any})}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none bg-white" 
                     >
                       <option value="cpf">CPF</option>
                       <option value="cnpj">CNPJ</option>
@@ -929,7 +1093,7 @@ export default function AdminDashboard() {
                       required
                       value={paymentForm.pixKey}
                       onChange={e => setPaymentForm({...paymentForm, pixKey: e.target.value})}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                       placeholder="Sua chave pix"
                     />
                   </div>
@@ -940,7 +1104,7 @@ export default function AdminDashboard() {
                       required
                       value={paymentForm.receiverName}
                       onChange={e => setPaymentForm({...paymentForm, receiverName: e.target.value})}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                       placeholder="Como aparece no banco"
                     />
                   </div>
@@ -950,7 +1114,7 @@ export default function AdminDashboard() {
                       type="text" 
                       value={paymentForm.city}
                       onChange={e => setPaymentForm({...paymentForm, city: e.target.value})}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                       placeholder="Ex: São Paulo"
                     />
                   </div>
@@ -959,7 +1123,7 @@ export default function AdminDashboard() {
 
               <div>
                 <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-4">
-                  <CreditCard className="w-5 h-5 text-teal-600" /> Integração de Cartão de Crédito
+                  <CreditCard className="w-5 h-5 text-[#ef007e]" /> Integração de Cartão de Crédito
                 </h3>
                 
                 <div className="grid md:grid-cols-2 gap-4">
@@ -968,7 +1132,7 @@ export default function AdminDashboard() {
                     <select 
                       value={paymentForm.gatewayProvider}
                       onChange={e => setPaymentForm({...paymentForm, gatewayProvider: e.target.value as any})}
-                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
+                      className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none bg-white" 
                     >
                       <option value="simulated">Simulado (Apenas testes)</option>
                       <option value="mercadopago">Mercado Pago</option>
@@ -977,13 +1141,27 @@ export default function AdminDashboard() {
                 </div>
                 
                 {paymentForm.gatewayProvider === 'mercadopago' && (
-                  <div className="mt-4 p-4 bg-teal-50 border border-teal-100 rounded-lg flex gap-3">
-                    <div className="flex-shrink-0">
-                      <CreditCard className="w-5 h-5 text-teal-600" />
+                  <div className="space-y-4 mt-4">
+                    <div className="p-4 bg-pink-50 border border-pink-200 rounded-lg flex gap-3">
+                      <div className="flex-shrink-0">
+                        <CreditCard className="w-5 h-5 text-[#ef007e]" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-[#96004b]">Processamento Centralizado</p>
+                        <p className="text-sm text-[#d9006f] mt-1">Os pagamentos por cartão e Pix via Checkout Pro são processados pela conta Mercado Pago da plataforma. Não é necessário preencher Access Token ou Public Key nesta versão.</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-teal-900">Processamento Centralizado</p>
-                      <p className="text-sm text-teal-700 mt-1">Os pagamentos por cartão são processados pela conta Mercado Pago da plataforma. Não é necessário preencher Access Token ou Public Key nesta versão.</p>
+                    
+                    <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg flex gap-3">
+                      <div className="flex-shrink-0">
+                        <QrCode className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-blue-900">Por que o Pix não aparece no Checkout?</p>
+                        <p className="text-sm text-blue-800 mt-1">
+                          No Checkout Pro, o Pix <strong>(bank_transfer)</strong> só será exibido ao convidado se a conta Mercado Pago recebedora (vendedor) possuir uma Chave Pix cadastrada e habilitada para vendas. Se você estiver usando contas de teste do Mercado Pago, certifique-se de não misturar credenciais de produção e de usar a conta de "seller" correta. O sistema não exclui nenhum método; se não aparece, é restrição da conta MP.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1015,18 +1193,18 @@ export default function AdminDashboard() {
               <div className="bg-slate-50 border-b border-slate-200 p-4">
                 <div className="flex items-center justify-between max-w-md mx-auto relative">
                   <div className="absolute left-0 top-1/2 w-full h-0.5 bg-slate-200 -z-10 -translate-y-1/2" />
-                  <div className="absolute left-0 top-1/2 h-0.5 bg-teal-600 -z-10 -translate-y-1/2 transition-all duration-300" style={{ width: settingsStep === 1 ? '0%' : settingsStep === 2 ? '50%' : '100%' }} />
+                  <div className="absolute left-0 top-1/2 h-0.5 bg-[#ef007e] -z-10 -translate-y-1/2 transition-all duration-300" style={{ width: settingsStep === 1 ? '0%' : settingsStep === 2 ? '50%' : '100%' }} />
                   {[1, 2, 3].map((step) => (
                     <button 
                       key={step} 
                       type="button"
                       onClick={() => setSettingsStep(step)}
-                      className={`flex flex-col items-center gap-1 bg-slate-50 px-2 cursor-pointer focus:outline-none ${settingsStep >= step ? 'text-teal-600' : 'text-slate-400'}`}
+                      className={`flex flex-col items-center gap-1 bg-slate-50 px-2 cursor-pointer focus:outline-none ${settingsStep >= step ? 'text-[#ef007e]' : 'text-slate-400'}`}
                     >
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-medium border-2 transition-colors ${settingsStep >= step ? 'bg-teal-600 border-teal-600 text-white' : 'bg-white border-slate-300 hover:border-teal-400 hover:text-teal-500'}`}>
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-medium border-2 transition-colors ${settingsStep >= step ? 'bg-[#ef007e] border-[#ef007e] text-white' : 'bg-white border-slate-300 hover:border-[#ef007e] hover:text-[#ef007e]'}`}>
                         {step}
                       </div>
-                      <span className={`text-xs font-medium hidden sm:block transition-colors ${settingsStep >= step ? 'text-teal-600' : 'hover:text-teal-500'}`}>
+                      <span className={`text-xs font-medium hidden sm:block transition-colors ${settingsStep >= step ? 'text-[#ef007e]' : 'hover:text-[#ef007e]'}`}>
                         {step === 1 ? 'Evento' : step === 2 ? 'Local' : 'Aparência'}
                       </span>
                     </button>
@@ -1046,7 +1224,7 @@ export default function AdminDashboard() {
                         <select 
                           value={settingsForm.eventType}
                           onChange={e => setSettingsForm({...settingsForm, eventType: e.target.value as 'casamento' | 'aniversário'})}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white" 
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none bg-white" 
                         >
                           <option value="casamento">Casamento</option>
                           <option value="aniversário">Aniversário</option>
@@ -1067,7 +1245,7 @@ export default function AdminDashboard() {
                               setSettingsForm({...settingsForm, title: newTitle});
                             }
                           }}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none"
                           placeholder={`Ex: ${settingsForm.eventType === 'casamento' ? 'Casamento de João e Maria' : 'Aniversário de Giullia'}`}
                         />
                       </div>
@@ -1083,7 +1261,7 @@ export default function AdminDashboard() {
                           <button 
                             type="button"
                             onClick={() => setShowManualSlug(!showManualSlug)} 
-                            className="text-sm text-teal-600 font-medium hover:text-teal-700 whitespace-nowrap self-start sm:self-auto"
+                            className="text-sm text-[#ef007e] font-medium hover:text-[#d9006f] whitespace-nowrap self-start sm:self-auto"
                           >
                             {showManualSlug ? 'Ocultar' : 'Editar URL'}
                           </button>
@@ -1103,7 +1281,7 @@ export default function AdminDashboard() {
                                   setIsSlugManual(true);
                                   setSettingsForm({...settingsForm, slug: e.target.value.replace(/[^a-z0-9-]/gi, '-').toLowerCase()})
                                 }} 
-                                className="flex-1 px-4 py-2 border border-slate-300 rounded-none rounded-r-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                                className="flex-1 px-4 py-2 border border-slate-300 rounded-none rounded-r-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                                 placeholder="meu-evento" 
                               />
                             </div>
@@ -1119,7 +1297,7 @@ export default function AdminDashboard() {
                           required
                           value={settingsForm.date ? settingsForm.date.slice(0, 16) : ''}
                           onChange={e => setSettingsForm({...settingsForm, date: new Date(e.target.value).toISOString()})}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                          className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                         />
                       </div>
                     </div>
@@ -1136,7 +1314,7 @@ export default function AdminDashboard() {
                         onChange={e => {
                           setSettingsForm({...settingsForm, locationName: e.target.value, locationMapsLink: ''});
                         }}
-                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                         placeholder="Digite o nome do local ou endereço"
                       />
                       <p className="text-xs text-slate-500 mt-2">Ex.: Salão Jardim, Igreja Central ou Rua Almerim, 115</p>
@@ -1146,7 +1324,7 @@ export default function AdminDashboard() {
                       <button 
                         type="button" 
                         onClick={() => setShowAdvancedAddress(true)}
-                        className="text-sm font-medium text-teal-600 flex items-center gap-1 hover:text-teal-700"
+                        className="text-sm font-medium text-[#ef007e] flex items-center gap-1 hover:text-[#d9006f]"
                       >
                         <Plus className="w-4 h-4" /> Adicionar detalhes do endereço
                       </button>
@@ -1160,7 +1338,7 @@ export default function AdminDashboard() {
                             type="text" 
                             value={settingsForm.locationAddress}
                             onChange={e => setSettingsForm({...settingsForm, locationAddress: e.target.value})}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                           />
                         </div>
                         <div className="grid sm:grid-cols-2 gap-4">
@@ -1170,7 +1348,7 @@ export default function AdminDashboard() {
                               type="text" 
                               value={settingsForm.locationCity}
                               onChange={e => setSettingsForm({...settingsForm, locationCity: e.target.value})}
-                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                             />
                           </div>
                           <div>
@@ -1180,7 +1358,7 @@ export default function AdminDashboard() {
                               maxLength={2}
                               value={settingsForm.locationState}
                               onChange={e => setSettingsForm({...settingsForm, locationState: e.target.value.toUpperCase()})}
-                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                             />
                           </div>
                         </div>
@@ -1227,7 +1405,7 @@ export default function AdminDashboard() {
                               value={settingsForm.locationMapsLink}
                               onChange={e => setSettingsForm({...settingsForm, locationMapsLink: e.target.value})}
                               placeholder="https://maps.app.goo.gl/..."
-                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none" 
+                              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none" 
                             />
                             <p className="text-xs text-slate-500 mt-1">Se preenchido, ignoramos a pesquisa automática e usamos este link.</p>
                           </div>
@@ -1245,7 +1423,7 @@ export default function AdminDashboard() {
                       <select 
                         value={settingsForm.coverMediaType} 
                         onChange={e => setSettingsForm({...settingsForm, coverMediaType: e.target.value as any})} 
-                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none bg-white"
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none bg-white"
                       >
                         <option value="image">Imagem</option>
                         <option value="video">Vídeo</option>
@@ -1286,7 +1464,7 @@ export default function AdminDashboard() {
                         rows={6}
                         value={settingsForm.story}
                         onChange={e => setSettingsForm({...settingsForm, story: e.target.value})}
-                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none resize-y" 
+                        className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none resize-y" 
                         placeholder="Conte um pouco da sua história..."
                       />
                     </div>
@@ -1316,7 +1494,7 @@ export default function AdminDashboard() {
                   <button 
                     type="button" 
                     onClick={handleSettingsSave}
-                    className="px-6 py-2 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 transition-colors"
+                    className="px-6 py-2 bg-[#ef007e] text-white rounded-lg font-medium hover:bg-[#d9006f] transition-colors"
                   >
                     Salvar Alterações
                   </button>

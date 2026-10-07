@@ -15,7 +15,7 @@ function AdminWrapper() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
+        <Loader2 className="w-12 h-12 text-[#ef007e] animate-spin" />
       </div>
     );
   }
@@ -34,7 +34,7 @@ function LoginWrapper() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <Loader2 className="w-12 h-12 text-teal-600 animate-spin" />
+        <Loader2 className="w-12 h-12 text-[#ef007e] animate-spin" />
       </div>
     );
   }

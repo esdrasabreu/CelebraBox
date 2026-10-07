@@ -1,5 +1,63 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: 'Stylish Calligraphy Demo';
+  src: url('/fonts/stylish-calligraphy-demo.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme {
+  --font-serif: 'Stylish Calligraphy Demo', 'Great Vibes', 'Playfair Display', serif, cursive;
+  --font-calligraphy: 'Stylish Calligraphy Demo', 'Great Vibes', cursive;
+  --color-fuchsia-brand: #ef007e;
+  --color-fuchsia-50: #fdf2f8;
+  --color-fuchsia-100: #fce7f3;
+  --color-fuchsia-200: #fbcfe8;
+  --color-fuchsia-300: #f472b6;
+  --color-fuchsia-400: #fa1b8f;
+  --color-fuchsia-500: #ef007e;
+  --color-fuchsia-600: #d9006f;
+  --color-fuchsia-700: #b8005b;
+  --color-fuchsia-800: #96004b;
+  --color-fuchsia-900: #78003c;
+}
+
+/* Calligraphy font helpers */
+.font-calligraphy {
+  font-family: 'Stylish Calligraphy Demo', 'Great Vibes', cursive;
+}
+
+.font-serif {
+  font-family: 'Stylish Calligraphy Demo', 'Great Vibes', 'Playfair Display', serif, cursive;
+}
+
+/* Fuchsia Brand Palette Helpers */
+.text-brand {
+  color: #ef007e;
+}
+
+.bg-brand {
+  background-color: #ef007e;
+}
+
+.bg-brand-hover:hover {
+  background-color: #d9006f;
+}
+
+.border-brand {
+  border-color: #ef007e;
+}
+
+.fuchsia-glow {
+  box-shadow: 0 10px 30px -5px rgba(239, 0, 126, 0.35);
+}
+
+.fuchsia-glow-subtle {
+  box-shadow: 0 4px 20px -2px rgba(239, 0, 126, 0.2);
+}
+
 @layer utilities {
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
@@ -8,7 +66,7 @@
     background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
+    background-color: #fbcfe8;
     border-radius: 20px;
   }
   

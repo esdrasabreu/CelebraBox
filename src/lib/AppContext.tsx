@@ -24,7 +24,7 @@ type AppContextType = {
   deleteGuest: (id: string) => void;
   
   transactions: Transaction[];
-  addTransaction: (transaction: Omit<Transaction, 'id' | 'date' | 'status'>) => void;
+  addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => void;
 
   gallery: GalleryImage[];
   addGalleryImage: (image: Omit<GalleryImage, 'id'>) => void;
@@ -138,12 +138,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
             coverImage: eventData.cover_image || '',
             coverMediaType: eventData.cover_media_type || 'image',
             coverVideoUrl: eventData.cover_video_url || '',
-            themeColor: eventData.theme_color || 'teal',
+            themeColor: eventData.theme_color || '#ef007e',
             slug: eventData.slug || ''
           });
         } else {
           setEventDetailsState({
-            eventType: 'casamento', title: '', date: '', story: '', coverImage: '', coverMediaType: 'image', coverVideoUrl: '', themeColor: '#0f766e', slug: '',
+            eventType: 'casamento', title: '', date: '', story: '', coverImage: '', coverMediaType: 'image', coverVideoUrl: '', themeColor: '#ef007e', slug: '',
             location: { name: '', address: '', city: '', state: '', mapsLink: '' }
           });
         }
@@ -387,24 +387,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     }
   };
 
-  const addTransaction = async (transaction: Omit<Transaction, 'id' | 'date' | 'status'>) => {
+  const addTransaction = async (transaction: Omit<Transaction, 'id' | 'date'>) => {
     const tempId = Math.random().toString(36).substr(2, 9);
     const newTx: Transaction = {
       ...transaction,
       id: tempId,
       date: new Date().toISOString(),
-      status: 'Concluído',
+      status: transaction.status || 'Concluído',
     };
     setTransactions(prev => [newTx, ...prev]);
     
     if (supabase && resolvedHostId !== 'default') {
       const { data } = await supabase.from('transactions').insert([{
         host_id: resolvedHostId,
+        gift_id: transaction.gift_id,
+        preference_id: transaction.preference_id,
+        external_reference: transaction.external_reference,
         gift_title: transaction.giftTitle,
         donor_name: transaction.donorName,
         amount: transaction.amount,
         method: transaction.method,
-        status: 'Concluído'
+        status: transaction.status || 'Concluído'
       }]).select().single();
       
       if (data) {

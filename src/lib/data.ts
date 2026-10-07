@@ -13,7 +13,7 @@ export const initialEventDetails: EventDetails = {
   },
   story: "Nos conhecemos há 5 anos e desde então construímos uma história linda juntos. Mal podemos esperar para celebrar nosso amor com as pessoas que mais amamos!",
   coverImage: "https://images.unsplash.com/photo-1519225421980-715cb0215aed?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=80",
-  themeColor: "#0f766e" // teal-700
+  themeColor: "#ef007e" // Rosa Fúcsia
 };
 
 export const initialGifts: Gift[] = [

@@ -13,11 +13,11 @@ export default function PaymentStatus() {
   let textColor = 'text-slate-800';
 
   if (status === 'sucesso') {
-    icon = <CheckCircle2 className="w-16 h-16 text-green-500 mx-auto mb-4" />;
-    title = 'Pagamento Aprovado!';
-    message = 'Muito obrigado! Sua contribuição foi recebida com sucesso e já está confirmada.';
-    bgColor = 'bg-green-50';
-    textColor = 'text-green-800';
+    icon = <CheckCircle2 className="w-16 h-16 text-[#ef007e] mx-auto mb-4" />;
+    title = 'Pagamento em Processamento';
+    message = 'Muito obrigado! Recebemos a sua tentativa de pagamento e estamos aguardando a confirmação do banco. Assim que o Mercado Pago aprovar, ele constará na nossa lista!';
+    bgColor = 'bg-pink-50';
+    textColor = 'text-[#b8005b]';
   } else if (status === 'falha') {
     icon = <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />;
     title = 'Falha no Pagamento';

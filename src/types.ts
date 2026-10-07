@@ -56,9 +56,9 @@ export type Transaction = {
   giftTitle: string;
   donorName: string;
   amount: number;
-  method: 'PIX' | 'Cartão de Crédito';
+  method: 'Aguardando' | 'PIX' | 'Cartão de Crédito' | 'Cartão de Débito' | 'Boleto' | 'Outro' | string;
   date: string;
-  status: 'Concluído' | 'Pendente';
+  status: 'checkout_started' | 'pending' | 'in_process' | 'approved' | 'rejected' | 'cancelled' | 'refunded' | 'expired' | 'Concluído' | 'Pendente';
   created_at?: string;
   updated_at?: string;
 };
@@ -92,6 +92,19 @@ export type LocationDetails = {
   city: string;
   state: string;
   mapsLink: string;
+  // Provider-independent extensions
+  formattedAddress?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  postalCode?: string;
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+  provider?: string;
+  providerPlaceId?: string;
+  mapsUrl?: string;
 };
 
 export type Host = {

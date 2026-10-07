@@ -7,7 +7,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { title, price, quantity, giftId, donorName, hostId } = req.body;
+    const { title, price, quantity, giftId, donorName, hostId, externalReference } = req.body;
     
     // Utilize token de plataforma em vez de buscar token do anfitrião
     const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
@@ -46,8 +46,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           failure: `${baseUrl}/e/${hostId}/pagamento/falha`,
           pending: `${baseUrl}/e/${hostId}/pagamento/pendente`
         },
+        payment_methods: {
+          installments: 12,
+          excluded_payment_types: [],
+          excluded_payment_methods: []
+        },
         auto_return: "approved",
         statement_descriptor: "PRESENTE",
+        external_reference: externalReference,
+        notification_url: `${baseUrl}/api/webhook/mercadopago`,
         metadata: {
           host_id: hostId,
           gift_id: giftId
@@ -55,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    res.json({ init_point: result.init_point });
+    res.json({ init_point: result.init_point, preference_id: result.id });
   } catch (error) {
     console.error("Error creating preference:", error);
     res.status(500).json({ error: "Failed to create preference" });

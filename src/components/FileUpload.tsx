@@ -58,7 +58,7 @@ export default function FileUpload({ bucket, pathPrefix, onUploadSuccess, accept
               <img src={preview} alt="Preview" className="w-full h-full object-cover rounded-lg" />
             )}
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 rounded-lg">
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-white text-slate-800 text-xs font-medium rounded-md hover:bg-teal-50">
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-white text-slate-800 text-xs font-medium rounded-md hover:bg-pink-50 hover:text-[#ef007e]">
                 Trocar
               </button>
               <button type="button" onClick={handleClear} className="px-3 py-1.5 bg-red-500 text-white text-xs font-medium rounded-md hover:bg-red-600">
