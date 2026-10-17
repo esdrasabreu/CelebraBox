@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt, UploadCloud, Menu, X, Check, ChevronRight, Sparkles } from 'lucide-react';
+import { Users, Gift, Settings, LogOut, Download, DollarSign, CreditCard, QrCode, Plus, Edit, Trash2, LayoutDashboard, Image as ImageIcon, Clock, Receipt, UploadCloud, Menu, X, Check, ChevronRight, Sparkles, RefreshCw, AlertCircle, ShieldCheck } from 'lucide-react';
 import { useAppContext } from '../lib/AppContext';
 import { useAuth } from '../lib/AuthContext';
 import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
@@ -14,7 +14,8 @@ export default function AdminDashboard() {
     paymentSettings, setPaymentSettings,
     guests, addGuest, updateGuest, deleteGuest,
     gifts, addGift, updateGift, deleteGift,
-    transactions,
+    transactions, refreshTransactions,
+    reservations, refreshReservations, releaseReservation,
     gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
     schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
     expenses, addExpense, updateExpense, deleteExpense,
@@ -55,11 +56,46 @@ export default function AdminDashboard() {
     }, 60);
   };
 
+  // Mercado Pago Sync State
+  const [isSyncingMP, setIsSyncingMP] = useState(false);
+
+  const handleSyncMercadoPago = async (silent = false) => {
+    setIsSyncingMP(true);
+    try {
+      const res = await fetch('/api/sync-mercadopago-payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostId: resolvedHostId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        await refreshTransactions();
+        await refreshReservations();
+        if (!silent) {
+          toast.success(`Sincronização concluída! ${data.importedCount || 0} pagamento(s) aprovado(s) verificado(s).`);
+        }
+      } else if (!silent) {
+        toast.error(data.error || 'Erro ao sincronizar com Mercado Pago.');
+      }
+    } catch (err: any) {
+      if (!silent) toast.error('Erro de conexão ao sincronizar Mercado Pago.');
+    } finally {
+      setIsSyncingMP(false);
+    }
+  };
+
+  // Auto sync on mount
+  useEffect(() => {
+    if (resolvedHostId) {
+      handleSyncMercadoPago(true);
+    }
+  }, [resolvedHostId]);
+
   // Financial calculations
   const approvedTransactions = transactions.filter(t => t.status === 'approved' || t.status === 'Concluído');
   const totalArrecadado = approvedTransactions.reduce((acc, curr) => acc + curr.amount, 0);
-  const totalPix = approvedTransactions.filter(t => t.method === 'PIX').reduce((acc, curr) => acc + curr.amount, 0);
-  const totalCartao = approvedTransactions.filter(t => t.method === 'Cartão de Crédito').reduce((acc, curr) => acc + curr.amount, 0);
+  const totalPix = approvedTransactions.filter(t => t.method === 'PIX' || t.method?.toLowerCase().includes('pix')).reduce((acc, curr) => acc + curr.amount, 0);
+  const totalCartao = approvedTransactions.filter(t => t.method?.toLowerCase().includes('cart') || t.method?.toLowerCase().includes('crédito') || t.method?.toLowerCase().includes('débito')).reduce((acc, curr) => acc + curr.amount, 0);
   const totalExpenses = expenses.reduce((acc, curr) => acc + curr.amount, 0);
 
   // GUESTS STATE
@@ -956,7 +992,18 @@ export default function AdminDashboard() {
                   <img src={g.imageUrl} alt={g.title} className="w-full h-32 object-cover" />
                   <div className="p-4 flex flex-col flex-1">
                     {g.category && <span className="text-xs text-[#ef007e] font-semibold uppercase mb-1">{g.category}</span>}
-                    <h4 className="font-semibold text-slate-800">{g.title} {g.quantity !== undefined ? <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {g.quantity}</span> : null}</h4>
+                    <h4 className="font-semibold text-slate-800">
+                      {g.title} 
+                      {g.quantity !== undefined ? <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {g.quantity}</span> : null}
+                      {(() => {
+                        const activeResCount = (reservations || []).filter(r => r.giftId === g.id && r.status === 'reserved' && new Date(r.expiresAt) > new Date()).length;
+                        return activeResCount > 0 ? (
+                          <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full ml-1 inline-flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> {activeResCount} travado (Pix 24h)
+                          </span>
+                        ) : null;
+                      })()}
+                    </h4>
                     <p className="text-sm text-slate-500 truncate mb-2">{g.description}</p>
                     <div className="mt-auto flex items-center justify-between pt-2 border-t border-slate-100">
                       <span className="font-bold text-slate-700">R$ {g.price.toFixed(2)}</span>
@@ -975,9 +1022,19 @@ export default function AdminDashboard() {
         {/* FINANCE TAB */}
         {activeTab === 'finance' && (
           <div className="space-y-6 max-w-5xl mx-auto">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-800">Financeiro</h2>
-              <p className="text-slate-500 text-sm">Resumo de arrecadação da sua lista de presentes virtual.</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800">Financeiro & Arrecadação</h2>
+                <p className="text-slate-500 text-sm">Resumo de presentes recebidos, Pix e cartões via Mercado Pago.</p>
+              </div>
+              <button
+                onClick={() => handleSyncMercadoPago(false)}
+                disabled={isSyncingMP}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-pink-50 text-[#ef007e] hover:bg-[#ef007e] hover:text-white rounded-xl font-semibold text-sm transition-all shadow-xs border border-pink-200 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSyncingMP ? 'animate-spin' : ''}`} />
+                <span>{isSyncingMP ? 'Sincronizando...' : 'Sincronizar com Mercado Pago'}</span>
+              </button>
             </div>
 
             <div className="grid sm:grid-cols-3 gap-4">
@@ -1003,6 +1060,57 @@ export default function AdminDashboard() {
                 <div className="text-3xl font-bold text-slate-800">R$ {totalCartao.toFixed(2)}</div>
               </div>
             </div>
+
+            {/* Active 24h PIX Locks Section */}
+            {(() => {
+              const activeResList = (reservations || []).filter(r => r.status === 'reserved' && new Date(r.expiresAt) > new Date());
+              if (activeResList.length === 0) return null;
+
+              return (
+                <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-5 shadow-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 text-amber-900 font-bold text-base">
+                      <Clock className="w-5 h-5 text-amber-600" />
+                      <span>Presentes com Trava de Pix (Validade de 24 horas)</span>
+                    </div>
+                    <span className="text-xs bg-amber-200/80 text-amber-900 font-semibold px-2.5 py-0.5 rounded-full">
+                      {activeResList.length} {activeResList.length === 1 ? 'item travado' : 'itens travados'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-800 mb-4 leading-relaxed">
+                    Estes presentes estão temporariamente travados para evitar compras duplicadas enquanto o pagador conclui o Pix. Se o pagamento não for feito dentro do prazo de 24h, a trava cai automaticamente e o presente volta à quantidade normal. Você também pode liberar a trava manualmente:
+                  </p>
+                  <div className="space-y-2">
+                    {activeResList.map(res => (
+                      <div key={res.id} className="bg-white p-3.5 rounded-xl border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm shadow-2xs">
+                        <div>
+                          <p className="font-semibold text-slate-800">{res.donorName}</p>
+                          <p className="text-xs text-slate-500">Presente: <strong>{res.giftTitle}</strong> • R$ {res.amount.toFixed(2)}</p>
+                          <p className="text-[11px] text-amber-600 mt-0.5">
+                            Gerado em: {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(res.createdAt))} • Expira em 24h
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (window.confirm(`Deseja liberar a trava do presente "${res.giftTitle}" para que volte a ficar disponível no estoque imediatamente?`)) {
+                              const success = await releaseReservation(res.id);
+                              if (success) {
+                                toast.success("Trava liberada com sucesso! O presente voltou à quantidade normal.");
+                              } else {
+                                toast.error("Não foi possível liberar a trava.");
+                              }
+                            }
+                          }}
+                          className="px-3.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg text-xs font-semibold transition-colors shrink-0 cursor-pointer"
+                        >
+                          Liberar Trava / Voltar ao Estoque
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
               <div className="flex items-center justify-between mb-6">
@@ -1142,25 +1250,43 @@ export default function AdminDashboard() {
                 
                 {paymentForm.gatewayProvider === 'mercadopago' && (
                   <div className="space-y-4 mt-4">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Access Token de Produção (Mercado Pago)
+                      </label>
+                      <input 
+                        type="password" 
+                        value={paymentForm.gatewayAccessToken}
+                        onChange={e => setPaymentForm({...paymentForm, gatewayAccessToken: e.target.value})}
+                        className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none font-mono text-xs" 
+                        placeholder="APP_USR-..."
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Se você já configurou a variável de ambiente <code>MERCADO_PAGO_ACCESS_TOKEN</code> no painel, este campo é opcional.
+                      </p>
+                    </div>
+
                     <div className="p-4 bg-pink-50 border border-pink-200 rounded-lg flex gap-3">
                       <div className="flex-shrink-0">
                         <CreditCard className="w-5 h-5 text-[#ef007e]" />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-[#96004b]">Processamento Centralizado</p>
-                        <p className="text-sm text-[#d9006f] mt-1">Os pagamentos por cartão e Pix via Checkout Pro são processados pela conta Mercado Pago da plataforma. Não é necessário preencher Access Token ou Public Key nesta versão.</p>
+                        <p className="text-sm font-medium text-[#96004b]">Checkout Pro Mercado Pago (Cartão e Pix)</p>
+                        <p className="text-sm text-[#d9006f] mt-1">
+                          Os convidados informam o próprio nome e e-mail no checkout para a emissão instantânea do Pix do Banco Central e comprovante seguro.
+                        </p>
                       </div>
                     </div>
                     
-                    <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg flex gap-3">
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex gap-3">
                       <div className="flex-shrink-0">
-                        <QrCode className="w-5 h-5 text-blue-600" />
+                        <QrCode className="w-5 h-5 text-amber-600 mt-0.5" />
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-blue-900">Por que o Pix não aparece no Checkout?</p>
-                        <p className="text-sm text-blue-800 mt-1">
-                          No Checkout Pro, o Pix <strong>(bank_transfer)</strong> só será exibido ao convidado se a conta Mercado Pago recebedora (vendedor) possuir uma Chave Pix cadastrada e habilitada para vendas. Se você estiver usando contas de teste do Mercado Pago, certifique-se de não misturar credenciais de produção e de usar a conta de "seller" correta. O sistema não exclui nenhum método; se não aparece, é restrição da conta MP.
-                        </p>
+                      <div className="text-xs text-amber-900 space-y-1.5">
+                        <p className="font-semibold text-sm text-amber-950">Orientações para o Pix em Produção funcionar perfeitamente:</p>
+                        <p>1. <strong>Chave Pix cadastrada:</strong> A sua conta Mercado Pago recebedora deve ter pelo menos uma chave Pix cadastrada no aplicativo do Mercado Pago.</p>
+                        <p>2. <strong>Autopagamento Proibido:</strong> O Mercado Pago impede que você pague a si mesmo. Se você estiver logado no Mercado Pago com a mesma conta que gerou o token, o Pix dá erro. Para testar, use uma aba anônima ou outro celular/conta de outra pessoa.</p>
+                        <p>3. <strong>E-mail real do comprador:</strong> O comprador deve digitar um e-mail real válido (ex: @gmail.com) no pop-up de presentes para que o Banco Central aprove a transação.</p>
                       </div>
                     </div>
                   </div>

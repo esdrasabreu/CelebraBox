@@ -14,7 +14,8 @@ import {
   Maximize2,
   Sparkles,
   Share2,
-  Check
+  Check,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
@@ -24,7 +25,7 @@ import PaymentModal from '../components/PaymentModal';
 import { Gift } from '../types';
 
 export default function PublicPage() {
-  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading, isNotFound } = useAppContext();
+  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading, isNotFound, reservations } = useAppContext();
   
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
   
@@ -789,12 +790,23 @@ export default function PublicPage() {
 
               <div ref={giftsRef} className="flex overflow-x-auto snap-x snap-mandatory gap-6 py-4 no-scrollbar scroll-smooth">
                 {gifts.map((gift) => {
-                  const isDisabled = gift.quantity !== undefined && gift.quantity <= 0;
+                  const now = new Date();
+                  const activeReservationsCount = (reservations || []).filter(r => 
+                    r.giftId === gift.id && r.status === 'reserved' && new Date(r.expiresAt) > now
+                  ).length;
+
+                  const hasLimitedQty = gift.quantity !== undefined && gift.quantity !== null;
+                  const currentQuantity = hasLimitedQty ? gift.quantity : undefined;
+                  const remainingQuantity = currentQuantity !== undefined ? Math.max(0, currentQuantity - activeReservationsCount) : undefined;
+                  const isSoldOut = currentQuantity !== undefined && currentQuantity <= 0;
+                  const isReserved = !isSoldOut && remainingQuantity !== undefined && remainingQuantity <= 0;
+                  const isDisabled = isSoldOut || isReserved;
+
                   return (
                     <div 
                       key={gift.id} 
                       className={`bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-xl border border-pink-100/80 flex flex-col transition-all duration-300 w-72 md:w-80 shrink-0 snap-start ${
-                        isDisabled ? 'opacity-50 grayscale' : ''
+                        isDisabled ? 'opacity-70' : ''
                       }`}
                     >
                       <div className="h-52 w-full bg-slate-100 overflow-hidden relative">
@@ -803,32 +815,63 @@ export default function PublicPage() {
                           alt={gift.title} 
                           className="w-full h-full object-cover transition-transform duration-500 hover:scale-105" 
                         />
+                        {isReserved && (
+                          <div className="absolute top-3 right-3 bg-amber-500/95 text-white text-xs font-semibold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1 backdrop-blur-xs">
+                            <Clock className="w-3 h-3" />
+                            <span>Reservado (Pix)</span>
+                          </div>
+                        )}
+                        {isSoldOut && (
+                          <div className="absolute top-3 right-3 bg-slate-800/80 text-white text-xs font-medium px-2.5 py-1 rounded-full shadow-md backdrop-blur-xs">
+                            Esgotado
+                          </div>
+                        )}
                       </div>
                       <div className="p-6 flex flex-col flex-1">
-                        {gift.category && (
-                          <span className="text-xs font-semibold text-[#ef007e] uppercase tracking-wider mb-2">
-                            {gift.category}
-                          </span>
-                        )}
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          {gift.category ? (
+                            <span className="text-xs font-semibold text-[#ef007e] uppercase tracking-wider">
+                              {gift.category}
+                            </span>
+                          ) : <span />}
+                          
+                          {remainingQuantity !== undefined && (
+                            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                              isReserved ? 'bg-amber-100 text-amber-800' :
+                              isSoldOut ? 'bg-slate-100 text-slate-500' :
+                              'bg-pink-50 text-[#ef007e] border border-pink-100'
+                            }`}>
+                              {isReserved ? 'Trava Pix ativa' : isSoldOut ? '0 un.' : `${remainingQuantity} disponível`}
+                            </span>
+                          )}
+                        </div>
+
                         <h3 className="font-semibold text-lg text-slate-800 mb-2 line-clamp-1">
                           {gift.title}
-                          {gift.quantity !== undefined && (
-                             <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full ml-2">Qtd: {gift.quantity}</span>
-                          )}
                         </h3>
                         <p className="text-slate-500 text-sm mb-4 flex-1 line-clamp-2">{gift.description}</p>
+                        
+                        {isReserved && (
+                          <p className="text-[11px] text-amber-700 bg-amber-50/80 p-2 rounded-lg border border-amber-200/60 mb-3 leading-tight flex items-start gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                            <span>Aguardando Pix (válido por 24h). Caso não seja pago, volta a ficar disponível!</span>
+                          </p>
+                        )}
+
                         <div className="flex items-center justify-between mt-auto pt-2 border-t border-slate-100">
                           <span className="font-bold text-lg text-[#ef007e]">R$ {gift.price.toFixed(2)}</span>
                           <button 
                             disabled={isDisabled}
                             onClick={() => setSelectedGift(gift)}
                             className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all cursor-pointer ${
-                              isDisabled 
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-                                : 'bg-pink-50 text-[#ef007e] hover:bg-[#ef007e] hover:text-white shadow-xs'
+                              isReserved 
+                                ? 'bg-amber-100 text-amber-800 cursor-not-allowed border border-amber-200 shadow-none'
+                                : isSoldOut
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                                  : 'bg-pink-50 text-[#ef007e] hover:bg-[#ef007e] hover:text-white shadow-xs'
                             }`}
                           >
-                            {isDisabled ? 'Esgotado' : 'Presentear'}
+                            {isReserved ? 'Reservado' : isSoldOut ? 'Esgotado' : 'Presentear'}
                           </button>
                         </div>
                       </div>

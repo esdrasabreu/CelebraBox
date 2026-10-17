@@ -24,7 +24,12 @@ type AppContextType = {
   deleteGuest: (id: string) => void;
   
   transactions: Transaction[];
-  addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => void;
+  addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => Promise<void>;
+  refreshTransactions: () => Promise<void>;
+
+  reservations: any[];
+  refreshReservations: () => Promise<void>;
+  releaseReservation: (id: string) => Promise<boolean>;
 
   gallery: GalleryImage[];
   addGalleryImage: (image: Omit<GalleryImage, 'id'>) => void;
@@ -68,6 +73,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   const [messages, setMessages] = useState<Message[]>(() => loadState('messages', initialMessages));
   const [guests, setGuests] = useState<Guest[]>(() => loadState('guests', initialGuests));
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadState('transactions', initialTransactions));
+  const [reservations, setReservations] = useState<any[]>([]);
   const [paymentSettings, setPaymentSettingsState] = useState<PaymentSettings>(() => loadState('payment_settings', initialPaymentSettings));
   const [gallery, setGallery] = useState<GalleryImage[]>(() => loadState('gallery', initialGallery));
   const [schedule, setSchedule] = useState<ScheduleItem[]>(() => loadState('schedule', initialSchedule));
@@ -191,7 +197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           confirmationCode: g.confirmation_code
         })) : []);
         
-        setTransactions(txData && txData.length > 0 ? txData.map(t => ({
+        let mergedTransactions: Transaction[] = txData && txData.length > 0 ? txData.map(t => ({
           id: t.id,
           giftTitle: t.gift_title,
           donorName: t.donor_name,
@@ -199,7 +205,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           method: t.method as any,
           date: t.date,
           status: t.status as any
-        })) : []);
+        })) : [];
+
+        // Fetch from persistent server store (captures webhooks, Pix payments, reservations)
+        try {
+          const [txServerRes, resRes] = await Promise.all([
+            fetch(`/api/transactions?hostId=${actualHostId}`),
+            fetch(`/api/reservations?hostId=${actualHostId}`)
+          ]);
+
+          if (txServerRes.ok) {
+            const serverTxs: any[] = await txServerRes.json();
+            serverTxs.forEach(st => {
+              const alreadyExists = mergedTransactions.some(mt => 
+                (st.payment_id && mt.payment_id === st.payment_id) || 
+                (st.external_reference && mt.external_reference === st.external_reference) ||
+                (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
+              );
+              if (!alreadyExists) {
+                mergedTransactions.unshift(st);
+              }
+            });
+          }
+
+          if (resRes.ok) {
+            const resData = await resRes.json();
+            setReservations(resData.reservations || []);
+          }
+        } catch (fetchServerErr) {
+          console.warn("Could not fetch server transactions/reservations:", fetchServerErr);
+        }
+
+        setTransactions(mergedTransactions);
         
         setGallery(galleryData && galleryData.length > 0 ? galleryData.map(g => ({
           id: g.id,
@@ -398,21 +435,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     setTransactions(prev => [newTx, ...prev]);
     
     if (supabase && resolvedHostId !== 'default') {
-      const { data } = await supabase.from('transactions').insert([{
-        host_id: resolvedHostId,
-        gift_id: transaction.gift_id,
-        preference_id: transaction.preference_id,
-        external_reference: transaction.external_reference,
-        gift_title: transaction.giftTitle,
-        donor_name: transaction.donorName,
-        amount: transaction.amount,
-        method: transaction.method,
-        status: transaction.status || 'Concluído'
-      }]).select().single();
-      
-      if (data) {
-        setTransactions(prev => prev.map(t => t.id === tempId ? { ...t, id: data.id, date: data.date } : t));
+      try {
+        const { data } = await supabase.from('transactions').insert([{
+          host_id: resolvedHostId,
+          gift_title: transaction.giftTitle,
+          donor_name: transaction.donorName,
+          amount: transaction.amount,
+          method: transaction.method,
+          status: transaction.status || 'Concluído'
+        }]).select().single();
+        
+        if (data) {
+          setTransactions(prev => prev.map(t => t.id === tempId ? { ...t, id: data.id, date: data.date } : t));
+        }
+      } catch (err) {
+        console.warn("Could not insert transaction in Supabase:", err);
       }
+    }
+  };
+
+  const refreshTransactions = async () => {
+    if (!resolvedHostId) return;
+    try {
+      const [txServerRes, supabaseRes] = await Promise.all([
+        fetch(`/api/transactions?hostId=${resolvedHostId}`),
+        supabase && resolvedHostId !== 'default' 
+          ? supabase.from('transactions').select('*').eq('host_id', resolvedHostId)
+          : Promise.resolve({ data: null })
+      ]);
+
+      let merged: Transaction[] = [];
+
+      if (supabaseRes.data && supabaseRes.data.length > 0) {
+        merged = supabaseRes.data.map(t => ({
+          id: t.id,
+          giftTitle: t.gift_title,
+          donorName: t.donor_name,
+          amount: t.amount,
+          method: t.method as any,
+          date: t.date,
+          status: t.status as any
+        }));
+      }
+
+      if (txServerRes.ok) {
+        const serverTxs: any[] = await txServerRes.json();
+        serverTxs.forEach(st => {
+          const exists = merged.some(mt => 
+            (st.payment_id && mt.payment_id === st.payment_id) || 
+            (st.external_reference && mt.external_reference === st.external_reference) ||
+            (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
+          );
+          if (!exists) {
+            merged.unshift(st);
+          }
+        });
+      }
+
+      if (merged.length > 0) {
+        setTransactions(merged);
+      }
+    } catch (e) {
+      console.warn("Error refreshing transactions:", e);
+    }
+  };
+
+  const refreshReservations = async () => {
+    if (!resolvedHostId) return;
+    try {
+      const res = await fetch(`/api/reservations?hostId=${resolvedHostId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setReservations(data.reservations || []);
+      }
+    } catch (e) {
+      console.warn("Error refreshing reservations:", e);
+    }
+  };
+
+  const releaseReservation = async (reservationId: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/reservations/release', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reservationId, hostId: resolvedHostId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        await refreshReservations();
+        await refreshTransactions();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn("Error releasing reservation:", e);
+      return false;
     }
   };
 
@@ -527,7 +644,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       gifts, addGift, updateGift, deleteGift,
       messages, addMessage,
       guests, addGuest, updateGuest, deleteGuest,
-      transactions, addTransaction,
+      transactions, addTransaction, refreshTransactions,
+      reservations, refreshReservations, releaseReservation,
       gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
       schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
       expenses, addExpense, updateExpense, deleteExpense,

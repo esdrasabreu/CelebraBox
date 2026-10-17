@@ -7,16 +7,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { title, price, quantity, giftId, donorName, hostId, externalReference } = req.body;
+    const { 
+      title, 
+      price, 
+      quantity = 1, 
+      giftId, 
+      donorName = "Convidado", 
+      donorMessage = "",
+      hostId = "default", 
+      externalReference, 
+      gatewayAccessToken 
+    } = req.body;
     
-    // Utilize token de plataforma em vez de buscar token do anfitrião
-    const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
+    const accessToken = gatewayAccessToken || process.env.MERCADO_PAGO_ACCESS_TOKEN || process.env.MP_ACCESS_TOKEN || "APP_USR-5302990072214596-080318-1c8251db5cc695db84a123841599bc20-3587153803";
 
     if (!accessToken) {
       return res.status(400).json({ error: "Access token is required" });
     }
 
-    const client = new MercadoPagoConfig({ accessToken, options: { timeout: 5000 } });
+    const client = new MercadoPagoConfig({ accessToken, options: { timeout: 10000 } });
     const preference = new Preference(client);
 
     let baseUrl = req.headers.origin;
@@ -27,20 +36,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       baseUrl = `${protocol}://${host}`;
     }
 
+    const payerObj: any = {
+      name: (donorName && String(donorName).trim()) || "Convidado"
+    };
+
+    const isPublicUrl = typeof baseUrl === 'string' && baseUrl.startsWith('https://') && !baseUrl.includes('localhost') && !baseUrl.includes('127.0.0.1');
+    const extRef = externalReference || `${hostId}:${giftId || 'gift'}:${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     const result = await preference.create({
       body: {
         items: [
           {
-            id: giftId || "gift",
-            title: title,
-            quantity: quantity || 1,
+            id: String(giftId || "gift"),
+            title: title || "Presente de Casamento",
+            quantity: Number(quantity) || 1,
             unit_price: Number(price)
           }
         ],
-        payer: {
-          name: donorName || "Convidado",
-          email: "convidado_" + Date.now() + "@testuser.com"
-        },
+        payer: payerObj,
         back_urls: {
           success: `${baseUrl}/e/${hostId}/pagamento/sucesso`,
           failure: `${baseUrl}/e/${hostId}/pagamento/falha`,
@@ -53,18 +66,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         },
         auto_return: "approved",
         statement_descriptor: "PRESENTE",
-        external_reference: externalReference,
-        notification_url: `${baseUrl}/api/webhook/mercadopago`,
+        external_reference: extRef,
+        ...(isPublicUrl ? { notification_url: `${baseUrl}/api/webhook/mercadopago` } : {}),
         metadata: {
           host_id: hostId,
-          gift_id: giftId
+          gift_id: giftId,
+          donor_name: donorName,
+          donor_message: donorMessage
         }
       }
     });
 
-    res.json({ init_point: result.init_point, preference_id: result.id });
-  } catch (error) {
-    console.error("Error creating preference:", error);
-    res.status(500).json({ error: "Failed to create preference" });
+    res.json({ init_point: result.init_point, preference_id: result.id, external_reference: extRef });
+  } catch (error: any) {
+    console.error("Error creating preference:", error?.message || error);
+    res.status(500).json({ error: "Failed to create preference", details: error?.message || error });
   }
 }
