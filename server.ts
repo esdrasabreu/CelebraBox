@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import dotenv from 'dotenv';
 import {
   createReservation,
@@ -27,7 +28,9 @@ async function startServer() {
   // Setup Supabase Client
   const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
   const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
-  const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+  const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey, {
+    realtime: { transport: WebSocket as any }
+  }) : null;
 
   // Helper to resolve host access token
   async function resolveAccessToken(hostId?: string, overrideToken?: string): Promise<string> {

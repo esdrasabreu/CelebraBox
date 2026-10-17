@@ -2,6 +2,32 @@
   "reservations": [],
   "transactions": [
     {
+      "id": "tx_1792265418574_7j6lo",
+      "host_id": "anna-giullia",
+      "gift_id": "f444d980-971a-41cf-8545-cdd5a1f3e78f",
+      "giftTitle": "mercado pago",
+      "donorName": "esdras testando",
+      "amount": 0.01,
+      "method": "PIX",
+      "status": "approved",
+      "date": "2026-10-17T12:01:56.000-04:00",
+      "payment_id": "184691992138",
+      "external_reference": "anna-giullia:f444d980-971a-41cf-8545-cdd5a1f3e78f:ef9c670d-edd8-43f5-93d8-60541f764403"
+    },
+    {
+      "id": "tx_1792265417810_303c3",
+      "host_id": "anna-giullia",
+      "gift_id": "f444d980-971a-41cf-8545-cdd5a1f3e78f",
+      "giftTitle": "mercado pago",
+      "donorName": "A mais lindo",
+      "amount": 0.01,
+      "method": "PIX",
+      "status": "approved",
+      "date": "2026-10-17T14:27:46.000-04:00",
+      "payment_id": "184716723554",
+      "external_reference": "anna-giullia:f444d980-971a-41cf-8545-cdd5a1f3e78f:3a9c6a59-9b8d-4bb5-bbea-845c0a540066"
+    },
+    {
       "id": "tx_1792252374139_m0e7c",
       "host_id": "",
       "gift_id": "",
@@ -315,7 +341,7 @@
     }
   ],
   "stockDeductions": {
-    "f444d980-971a-41cf-8545-cdd5a1f3e78f": 4,
-    "1d66aa1f-69ea-44bd-8e23-8909af80186f": 4
+    "f444d980-971a-41cf-8545-cdd5a1f3e78f": 101,
+    "1d66aa1f-69ea-44bd-8e23-8909af80186f": 35
   }
 }

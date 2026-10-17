@@ -218,14 +218,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
           if (txServerRes.ok) {
             const serverTxs: any[] = await txServerRes.json();
+            const statusRank: Record<string, number> = {
+              checkout_started: 0, pending: 1, in_process: 2,
+              approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
+            };
             serverTxs.forEach(st => {
-              const alreadyExists = mergedTransactions.some(mt => 
-                (st.payment_id && mt.payment_id === st.payment_id) || 
+              const matchIdx = mergedTransactions.findIndex(mt =>
+                (st.payment_id && mt.payment_id === st.payment_id) ||
                 (st.external_reference && mt.external_reference === st.external_reference) ||
                 (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
               );
-              if (!alreadyExists) {
+              if (matchIdx === -1) {
                 mergedTransactions.unshift(st);
+              } else {
+                // Upgrade status if the incoming record is more final
+                const existingRank = statusRank[mergedTransactions[matchIdx].status] ?? 0;
+                const incomingRank = statusRank[st.status] ?? 0;
+                if (incomingRank > existingRank) {
+                  mergedTransactions[matchIdx] = { ...mergedTransactions[matchIdx], ...st };
+                }
               }
             });
           }
@@ -484,14 +495,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
       if (txServerRes.ok) {
         const serverTxs: any[] = await txServerRes.json();
+        const statusRank: Record<string, number> = {
+          checkout_started: 0, pending: 1, in_process: 2,
+          approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
+        };
         serverTxs.forEach(st => {
-          const exists = merged.some(mt => 
-            (st.payment_id && mt.payment_id === st.payment_id) || 
+          const matchIdx = merged.findIndex(mt =>
+            (st.payment_id && mt.payment_id === st.payment_id) ||
             (st.external_reference && mt.external_reference === st.external_reference) ||
             (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
           );
-          if (!exists) {
+          if (matchIdx === -1) {
             merged.unshift(st);
+          } else {
+            const existingRank = statusRank[merged[matchIdx].status] ?? 0;
+            const incomingRank = statusRank[st.status] ?? 0;
+            if (incomingRank > existingRank) {
+              merged[matchIdx] = { ...merged[matchIdx], ...st };
+            }
           }
         });
       }
