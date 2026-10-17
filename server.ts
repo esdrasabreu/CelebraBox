@@ -246,19 +246,36 @@ async function startServer() {
         }
       }
 
-      // 3. Insert transaction in Supabase using safe columns that always exist
+      // 3. Insert or update transaction in Supabase with all tracking fields
       if (supabase && hostId) {
         try {
-          await supabase.from('transactions').insert([{
-            host_id: hostId,
-            gift_title: giftTitle,
-            donor_name: donorName,
-            amount: amount,
-            method: methodFriendly,
-            status: 'approved'
-          }]);
+          // Check if already recorded (avoid duplicates using payment_id)
+          const { data: existingTx } = await supabase
+            .from('transactions')
+            .select('id')
+            .eq('payment_id', paymentId)
+            .maybeSingle();
+
+          if (!existingTx) {
+            await supabase.from('transactions').insert([{
+              host_id: hostId,
+              gift_title: giftTitle,
+              gift_id: giftId || null,
+              donor_name: donorName,
+              amount: amount,
+              method: methodFriendly,
+              status: 'approved',
+              payment_id: paymentId,
+              external_reference: externalReference || null
+            }]);
+          } else {
+            // Update existing record to approved if it was pending
+            await supabase.from('transactions')
+              .update({ status: 'approved', method: methodFriendly, amount: amount })
+              .eq('payment_id', paymentId);
+          }
         } catch (supabaseTxErr) {
-          console.warn("Could not insert transaction in Supabase (will rely on server store):", supabaseTxErr);
+          console.warn("Could not insert/update transaction in Supabase (will rely on server store):", supabaseTxErr);
         }
       }
     } else if (status === 'cancelled' || status === 'rejected' || status === 'refunded') {
@@ -279,17 +296,41 @@ async function startServer() {
       const paymentId = body.data?.id || body.id || query.id || query['data.id'];
 
       if (paymentId && (type === 'payment' || action === 'payment' || action === 'payment.created' || action === 'payment.updated' || !type)) {
-        const accessToken = await resolveAccessToken();
-        const client = new MercadoPagoConfig({ accessToken, options: { timeout: 10000 } });
-        const paymentClient = new Payment(client);
-        
+        // First fetch with default token to get the externalReference
+        // then resolve the correct per-host token
+        let accessToken = await resolveAccessToken();
+        let paymentInfo: any = null;
+
         try {
-          const paymentInfo = await paymentClient.get({ id: String(paymentId) });
-          if (paymentInfo) {
-            await handlePaymentConfirmation(paymentInfo);
-          }
+          const tempClient = new MercadoPagoConfig({ accessToken, options: { timeout: 10000 } });
+          paymentInfo = await new Payment(tempClient).get({ id: String(paymentId) });
         } catch (fetchErr: any) {
           console.warn(`Could not fetch payment ${paymentId} from Mercado Pago:`, fetchErr?.message || fetchErr);
+        }
+
+        if (paymentInfo) {
+          // Try to resolve the correct host token from the payment metadata or externalReference
+          const extRef = paymentInfo.external_reference || '';
+          let hostIdFromRef = paymentInfo.metadata?.host_id || '';
+          if (!hostIdFromRef && extRef.includes(':')) {
+            hostIdFromRef = extRef.split(':')[0];
+          }
+
+          if (hostIdFromRef && hostIdFromRef !== 'default') {
+            const hostToken = await resolveAccessToken(hostIdFromRef);
+            // If the host has their own token, re-fetch with the correct token
+            if (hostToken !== accessToken) {
+              try {
+                const hostClient = new MercadoPagoConfig({ accessToken: hostToken, options: { timeout: 10000 } });
+                const refetched = await new Payment(hostClient).get({ id: String(paymentId) });
+                if (refetched) paymentInfo = refetched;
+              } catch (refetchErr: any) {
+                console.warn(`Re-fetch with host token failed, using default:`, refetchErr?.message);
+              }
+            }
+          }
+
+          await handlePaymentConfirmation(paymentInfo);
         }
       }
 
@@ -398,7 +439,9 @@ async function startServer() {
         options: {
           sort: 'date_created',
           criteria: 'desc',
-          limit: 30
+          limit: 50,
+          begin_date: 'NOW-30DAYS',
+          end_date: 'NOW'
         }
       });
 

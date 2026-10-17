@@ -204,7 +204,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           amount: t.amount,
           method: t.method as any,
           date: t.date,
-          status: t.status as any
+          status: t.status as any,
+          payment_id: t.payment_id || undefined,
+          external_reference: t.external_reference || undefined
         })) : [];
 
         // Fetch from persistent server store (captures webhooks, Pix payments, reservations)
@@ -474,7 +476,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           amount: t.amount,
           method: t.method as any,
           date: t.date,
-          status: t.status as any
+          status: t.status as any,
+          payment_id: t.payment_id || undefined,
+          external_reference: t.external_reference || undefined
         }));
       }
 
