@@ -15,17 +15,24 @@ import {
   Sparkles,
   Share2,
   Check,
-  Clock
+  Clock,
+  User,
+  UserCheck,
+  UserX,
+  Search,
+  ChevronDown,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
 import { useAppContext } from '../lib/AppContext';
 import CountdownTimer from '../components/CountdownTimer';
 import PaymentModal from '../components/PaymentModal';
-import { Gift } from '../types';
+import { Gift, Guest } from '../types';
 
 export default function PublicPage() {
-  const { eventDetails, gifts, messages, addMessage, guests, updateGuest, gallery, isLoading, isNotFound, reservations } = useAppContext();
+  const { eventDetails, gifts, messages, addMessage, guests, addGuest, updateGuest, gallery, isLoading, isNotFound, reservations } = useAppContext();
   
   const [selectedGift, setSelectedGift] = useState<Gift | null>(null);
   
@@ -33,11 +40,16 @@ export default function PublicPage() {
   const [msgName, setMsgName] = useState('');
   const [msgContent, setMsgContent] = useState('');
 
-  // RSVP Form State
+  // RSVP Form & Auto-complete State
   const [searchParams] = useSearchParams();
   const initialCode = searchParams.get('code') || '';
-  const [rsvpName, setRsvpName] = useState(initialCode);
-  const [rsvpStatus, setRsvpStatus] = useState<'idle' | 'success' | 'not_found'>('idle');
+  const [rsvpQuery, setRsvpQuery] = useState(initialCode);
+  const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [rsvpStatus, setRsvpStatus] = useState<'idle' | 'success' | 'declined' | 'not_found'>('idle');
+  const [confirmedGuestName, setConfirmedGuestName] = useState('');
+  const [isSubmittingRsvp, setIsSubmittingRsvp] = useState(false);
+  const rsvpContainerRef = useRef<HTMLDivElement>(null);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [activeNavSection, setActiveNavSection] = useState('home');
@@ -122,43 +134,100 @@ export default function PublicPage() {
     setMsgContent('');
   };
 
+  const normalizeStr = (str: string) => 
+    str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+  // Suggestions filtered in real-time as the user types
+  const rsvpSuggestions = React.useMemo(() => {
+    const q = normalizeStr(rsvpQuery);
+    if (!q || q.length < 1) return [];
+
+    return guests.filter(g => {
+      const gName = normalizeStr(g.name);
+      const gCode = g.confirmationCode ? normalizeStr(g.confirmationCode) : '';
+      return gName.includes(q) || gCode.includes(q);
+    }).slice(0, 8);
+  }, [guests, rsvpQuery]);
+
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (rsvpContainerRef.current && !rsvpContainerRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelectGuest = (guest: Guest) => {
+    setSelectedGuest(guest);
+    setRsvpQuery(guest.name);
+    setIsDropdownOpen(false);
+  };
+
+  const handleConfirmRsvp = async (guest: Guest, targetStatus: 'Confirmado' | 'Não vai') => {
+    setIsSubmittingRsvp(true);
+    try {
+      await updateGuest(guest.id, { status: targetStatus });
+      setConfirmedGuestName(guest.name);
+      setRsvpStatus(targetStatus === 'Confirmado' ? 'success' : 'declined');
+      setSelectedGuest(null);
+      setRsvpQuery('');
+      setIsDropdownOpen(false);
+    } catch (err) {
+      console.warn("Error updating RSVP:", err);
+    } finally {
+      setIsSubmittingRsvp(false);
+      setTimeout(() => setRsvpStatus('idle'), 6000);
+    }
+  };
+
+  const handleRegisterAndConfirm = async (name: string, targetStatus: 'Confirmado' | 'Não vai' = 'Confirmado') => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setIsSubmittingRsvp(true);
+    try {
+      await addGuest({ name: trimmed, status: targetStatus });
+      setConfirmedGuestName(trimmed);
+      setRsvpStatus(targetStatus === 'Confirmado' ? 'success' : 'declined');
+      setSelectedGuest(null);
+      setRsvpQuery('');
+      setIsDropdownOpen(false);
+    } catch (err) {
+      console.warn("Error registering RSVP:", err);
+    } finally {
+      setIsSubmittingRsvp(false);
+      setTimeout(() => setRsvpStatus('idle'), 6000);
+    }
+  };
+
   const handleRsvpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const searchInput = rsvpName.trim();
+    if (selectedGuest) {
+      await handleConfirmRsvp(selectedGuest, 'Confirmado');
+      return;
+    }
+
+    const searchInput = rsvpQuery.trim();
     if (!searchInput) return;
-    
-    // First try by confirmation code (case insensitive)
+
+    // Check exact or single partial match
+    const searchName = normalizeStr(searchInput);
     let guest = guests.find(g => g.confirmationCode?.toLowerCase() === searchInput.toLowerCase());
-    
-    // If not found by code, try by normalized name
     if (!guest) {
-      const normalizeStr = (str: string) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-      const searchName = normalizeStr(searchInput);
-      
-      // Exact match after normalization
       guest = guests.find(g => normalizeStr(g.name) === searchName);
-      
-      if (!guest) {
-         const possibleMatches = guests.filter(g => normalizeStr(g.name).includes(searchName) || searchName.includes(normalizeStr(g.name)));
-         if (possibleMatches.length === 1) {
-             guest = possibleMatches[0];
-         } else if (possibleMatches.length > 1) {
-             setRsvpStatus('not_found');
-         }
-      }
+    }
+    if (!guest && rsvpSuggestions.length === 1) {
+      guest = rsvpSuggestions[0];
     }
 
     if (guest) {
-      await updateGuest(guest.id, { status: 'Confirmado' });
-      setRsvpStatus('success');
+      await handleConfirmRsvp(guest, 'Confirmado');
     } else {
-      setRsvpStatus('not_found');
+      // Auto-register so confirmation never fails on any account!
+      await handleRegisterAndConfirm(searchInput, 'Confirmado');
     }
-
-    setTimeout(() => {
-      setRsvpStatus('idle');
-      if (guest) setRsvpName('');
-    }, 4000);
   };
 
   const scrollToSection = (id: string, label?: string) => {
@@ -707,48 +776,232 @@ export default function PublicPage() {
         viewport={{ once: true, margin: "-100px" }}
         variants={fadeUpVariant}
       >
-        <div className="max-w-lg mx-auto">
-          <div className="text-center mb-10">
+        <div className="max-w-lg mx-auto" ref={rsvpContainerRef}>
+          <div className="text-center mb-8">
             <h2 className="text-4xl md:text-5xl font-serif mb-4 text-slate-800 tracking-wide">Confirme sua Presença</h2>
             <div className="h-1 w-16 bg-[#ef007e] mx-auto mb-4 rounded-full" />
-            <p className="text-slate-600 font-light">
-              Por favor, digite seu nome completo ou código de confirmação abaixo para confirmar.
+            <p className="text-slate-600 font-light text-sm md:text-base">
+              Digite as primeiras letras do seu nome para encontrar sua confirmação.
             </p>
           </div>
 
-          <form onSubmit={handleRsvpSubmit} className="bg-white p-6 md:p-8 rounded-3xl shadow-md border border-pink-100">
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Nome ou Código de Confirmação</label>
-              <input 
-                type="text" 
-                required 
-                value={rsvpName} 
-                onChange={e => setRsvpName(e.target.value)} 
-                className="w-full px-4 py-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#ef007e] focus:border-[#ef007e] focus:outline-none text-slate-800" 
-                placeholder="Ex: João da Silva ou ABC123" 
-              />
-            </div>
-            
-            {rsvpStatus === 'success' && (
-              <div className="mb-4 text-emerald-800 text-sm font-medium bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 flex items-center gap-2">
-                <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                <span>Presença confirmada com sucesso! Mal podemos esperar para celebrar juntos! 🎉</span>
-              </div>
-            )}
-            
-            {rsvpStatus === 'not_found' && (
-              <div className="mb-4 text-rose-800 text-sm font-medium bg-rose-50 p-3.5 rounded-xl border border-rose-200">
-                Nome ou código não encontrado na lista. Verifique a digitação ou entre em contato com o anfitrião.
-              </div>
-            )}
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-pink-100 relative">
+            <form onSubmit={handleRsvpSubmit} className="space-y-4">
+              <div className="relative">
+                <label className="block text-sm font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>Seu Nome ou Código</span>
+                  {selectedGuest && (
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedGuest(null); setRsvpQuery(''); }}
+                      className="text-xs text-[#ef007e] hover:underline font-normal cursor-pointer"
+                    >
+                      Trocar convidado
+                    </button>
+                  )}
+                </label>
 
-            <button 
-              type="submit" 
-              className="w-full bg-[#ef007e] text-white py-3.5 rounded-xl font-medium hover:bg-[#d9006f] transition-all shadow-md shadow-pink-500/20 hover:-translate-y-0.5 cursor-pointer"
-            >
-              Confirmar Agora
-            </button>
-          </form>
+                <div className="relative">
+                  <Search className="w-5 h-5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input 
+                    type="text" 
+                    required 
+                    value={rsvpQuery} 
+                    onChange={e => {
+                      setRsvpQuery(e.target.value);
+                      setIsDropdownOpen(true);
+                      if (selectedGuest && e.target.value !== selectedGuest.name) {
+                        setSelectedGuest(null);
+                      }
+                    }} 
+                    onFocus={() => {
+                      if (rsvpQuery.trim().length > 0) setIsDropdownOpen(true);
+                    }}
+                    className="w-full pl-11 pr-10 py-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-[#ef007e] focus:border-[#ef007e] focus:outline-none text-slate-800 text-sm md:text-base transition-all bg-white" 
+                    placeholder="Digite seu nome (ex: Maria...)" 
+                    autoComplete="off"
+                  />
+                  {rsvpQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRsvpQuery('');
+                        setSelectedGuest(null);
+                        setIsDropdownOpen(false);
+                      }}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Floating Auto-complete Dropdown */}
+                <AnimatePresence>
+                  {isDropdownOpen && rsvpQuery.trim().length > 0 && !selectedGuest && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -8 }}
+                      className="absolute z-50 left-0 right-0 mt-1.5 bg-white rounded-2xl shadow-xl border border-pink-100 max-h-72 overflow-y-auto divide-y divide-slate-100"
+                    >
+                      {rsvpSuggestions.length > 0 ? (
+                        <>
+                          <div className="p-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wider bg-slate-50/70">
+                            Sugestões encontradas ({rsvpSuggestions.length})
+                          </div>
+                          {rsvpSuggestions.map(g => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => handleSelectGuest(g)}
+                              className="w-full p-3.5 text-left hover:bg-pink-50/60 transition-colors flex items-center justify-between gap-3 cursor-pointer group"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="w-8 h-8 rounded-full bg-pink-100/70 text-[#ef007e] flex items-center justify-center font-bold text-xs shrink-0 group-hover:bg-[#ef007e] group-hover:text-white transition-colors">
+                                  {g.name.charAt(0).toUpperCase()}
+                                </span>
+                                <div className="truncate">
+                                  <p className="text-sm font-semibold text-slate-800 truncate group-hover:text-[#ef007e] transition-colors">
+                                    {g.name}
+                                  </p>
+                                  {g.confirmationCode && (
+                                    <p className="text-[11px] text-slate-400">Cód: {g.confirmationCode}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className={`text-[11px] font-medium px-2.5 py-1 rounded-full shrink-0 ${
+                                g.status === 'Confirmado' ? 'bg-emerald-100 text-emerald-800' :
+                                g.status === 'Não vai' ? 'bg-slate-100 text-slate-600' :
+                                'bg-amber-100 text-amber-800'
+                              }`}>
+                                {g.status === 'Confirmado' ? 'Já Confirmado' : g.status === 'Não vai' ? 'Não Comparecerá' : 'Pendente'}
+                              </span>
+                            </button>
+                          ))}
+                        </>
+                      ) : null}
+
+                      {/* Fallback to confirm directly if name not found on pre-registered list */}
+                      <div className="p-3 bg-slate-50/80">
+                        <p className="text-xs text-slate-500 mb-2">
+                          {rsvpSuggestions.length > 0 ? 'Não é você?' : 'Nome não listado previamente?'} Você pode confirmar seu nome agora:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleRegisterAndConfirm(rsvpQuery, 'Confirmado')}
+                          className="w-full py-2.5 px-3 bg-[#ef007e] hover:bg-[#d9006f] text-white rounded-xl text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>Confirmar presença como "{rsvpQuery.trim()}"</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Selected Guest Card */}
+              {selectedGuest && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-4 bg-gradient-to-br from-pink-50/80 to-pink-100/30 rounded-2xl border border-pink-200/80 space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-[#ef007e]" />
+                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Convidado Selecionado</span>
+                    </div>
+                    <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                      selectedGuest.status === 'Confirmado' ? 'bg-emerald-100 text-emerald-800' :
+                      selectedGuest.status === 'Não vai' ? 'bg-slate-200 text-slate-700' :
+                      'bg-amber-100 text-amber-800'
+                    }`}>
+                      {selectedGuest.status}
+                    </span>
+                  </div>
+
+                  <p className="text-base font-bold text-slate-800">
+                    {selectedGuest.name}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isSubmittingRsvp}
+                      onClick={() => handleConfirmRsvp(selectedGuest, 'Confirmado')}
+                      className="py-3 px-3 bg-[#ef007e] hover:bg-[#d9006f] text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-pink-200 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Confirmar Presença 🎉</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSubmittingRsvp}
+                      onClick={() => handleConfirmRsvp(selectedGuest, 'Não vai')}
+                      className="py-3 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <UserX className="w-4 h-4 text-slate-500" />
+                      <span>Não poderei ir</span>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Success Notification */}
+              {rsvpStatus === 'success' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-emerald-900 text-sm font-medium bg-emerald-50 p-4 rounded-2xl border border-emerald-200 flex items-start gap-3 shadow-xs"
+                >
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Presença confirmada com sucesso! 🎉</p>
+                    <p className="text-xs text-emerald-700 mt-0.5">
+                      {confirmedGuestName ? `Obrigado, ${confirmedGuestName}! ` : ''}Mal podemos esperar para celebrar juntos esse dia inesquecível!
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Declined Notification */}
+              {rsvpStatus === 'declined' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-slate-800 text-sm font-medium bg-slate-100 p-4 rounded-2xl border border-slate-200 flex items-start gap-3 shadow-xs"
+                >
+                  <AlertCircle className="w-5 h-5 text-slate-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Resposta registrada</p>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Sentiremos sua falta! Obrigado por nos avisar com antecedência.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Main Submit Button (when no specific card is selected) */}
+              {!selectedGuest && (
+                <button 
+                  type="submit" 
+                  disabled={isSubmittingRsvp || !rsvpQuery.trim()}
+                  className="w-full bg-[#ef007e] text-white py-3.5 rounded-xl font-semibold hover:bg-[#d9006f] transition-all shadow-md shadow-pink-500/20 hover:-translate-y-0.5 cursor-pointer disabled:opacity-50 text-sm flex items-center justify-center gap-2"
+                >
+                  {isSubmittingRsvp ? (
+                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirmar Presença</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </form>
+          </div>
         </div>
       </motion.section>
 

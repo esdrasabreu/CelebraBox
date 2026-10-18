@@ -6,6 +6,7 @@ import { useAuth } from '../lib/AuthContext';
 import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
 import FileUpload from '../components/FileUpload';
 import { uploadFile } from '../lib/storage';
+import { supabase } from '../lib/supabase';
 
 export default function AdminDashboard() {
   const { host, logout } = useAuth();
@@ -62,11 +63,44 @@ export default function AdminDashboard() {
   const handleSyncMercadoPago = async (silent = false) => {
     setIsSyncingMP(true);
     try {
+      let sessionToken = '';
+      if (supabase) {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data?.session?.access_token) {
+            sessionToken = data.session.access_token;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const res = await fetch('/api/sync-mercadopago-payments', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostId: resolvedHostId })
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(sessionToken ? { 'Authorization': `Bearer ${sessionToken}` } : {})
+        },
+        body: JSON.stringify({ 
+          hostId: resolvedHostId,
+          gatewayAccessToken: paymentSettings.gatewayAccessToken || ''
+        })
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        let errMsg = 'Erro de conexão ao sincronizar Mercado Pago.';
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed.error || parsed.details) {
+            errMsg = parsed.error || parsed.details;
+          }
+        } catch {
+          // Response wasn't JSON
+        }
+        throw new Error(errMsg);
+      }
+
       const data = await res.json();
       if (data.success) {
         await refreshTransactions();
@@ -78,7 +112,8 @@ export default function AdminDashboard() {
         toast.error(data.error || 'Erro ao sincronizar com Mercado Pago.');
       }
     } catch (err: any) {
-      if (!silent) toast.error('Erro de conexão ao sincronizar Mercado Pago.');
+      console.warn("Mercado Pago sync error:", err);
+      if (!silent) toast.error(err.message || 'Erro de conexão ao sincronizar Mercado Pago.');
     } finally {
       setIsSyncingMP(false);
     }

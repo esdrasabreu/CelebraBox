@@ -2,6 +2,19 @@
   "reservations": [],
   "transactions": [
     {
+      "id": "tx_1792350390905_27t7z",
+      "host_id": "giullia-abreu-xv",
+      "gift_id": "7da23ae2-63f2-42a6-bc28-52e3c9382364",
+      "giftTitle": "Dnkssk",
+      "donorName": "Iza",
+      "amount": 0.01,
+      "method": "PIX",
+      "status": "approved",
+      "date": "2026-10-17T21:05:18.000-04:00",
+      "payment_id": "183757166939",
+      "external_reference": "giullia-abreu-xv:7da23ae2-63f2-42a6-bc28-52e3c9382364:9d38e779-6123-4ec2-b07d-5abea8c598cb"
+    },
+    {
       "id": "tx_1792265418574_7j6lo",
       "host_id": "anna-giullia",
       "gift_id": "f444d980-971a-41cf-8545-cdd5a1f3e78f",
@@ -341,7 +354,8 @@
     }
   ],
   "stockDeductions": {
-    "f444d980-971a-41cf-8545-cdd5a1f3e78f": 101,
-    "1d66aa1f-69ea-44bd-8e23-8909af80186f": 35
+    "f444d980-971a-41cf-8545-cdd5a1f3e78f": 104,
+    "1d66aa1f-69ea-44bd-8e23-8909af80186f": 36,
+    "7da23ae2-63f2-42a6-bc28-52e3c9382364": 1
   }
 }

@@ -190,12 +190,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           createdAt: m.created_at
         })) : []);
         
-        setGuests(guestsData && guestsData.length > 0 ? guestsData.map(g => ({
+        let loadedGuests: Guest[] = guestsData && guestsData.length > 0 ? guestsData.map(g => ({
           id: g.id,
           name: g.name,
           status: g.status as any,
           confirmationCode: g.confirmation_code
-        })) : []);
+        })) : [];
+
+        // If Supabase returned empty (e.g. Due to RLS for public visitors), try /api/guests
+        if (loadedGuests.length === 0) {
+          try {
+            const guestsRes = await fetch(`/api/guests?hostId=${actualHostId}`);
+            if (guestsRes.ok) {
+              const apiGuests = await guestsRes.json();
+              if (Array.isArray(apiGuests) && apiGuests.length > 0) {
+                loadedGuests = apiGuests.map((g: any) => ({
+                  id: g.id,
+                  name: g.name,
+                  status: g.status as any,
+                  confirmationCode: g.confirmationCode || g.confirmation_code
+                }));
+              }
+            }
+          } catch (gErr) {
+            console.warn("Could not fetch guests from /api/guests:", gErr);
+          }
+        }
+
+        // Retain cached guests from localStorage if API and DB had none
+        if (loadedGuests.length === 0) {
+          const cachedGuests = loadState<Guest[]>('guests', []);
+          if (cachedGuests && cachedGuests.length > 0) {
+            loadedGuests = cachedGuests;
+          }
+        }
+
+        setGuests(loadedGuests);
         
         let mergedTransactions: Transaction[] = txData && txData.length > 0 ? txData.map(t => ({
           id: t.id,
@@ -402,31 +432,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
   const addGuest = async (guest: Omit<Guest, 'id'>) => {
     const tempId = Math.random().toString(36).substr(2, 9);
-    const confirmationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const confirmationCode = guest.confirmationCode || Math.random().toString(36).substring(2, 8).toUpperCase();
     const newGuest = { ...guest, id: tempId, confirmationCode };
     setGuests(prev => [...prev, newGuest]);
     
     if (supabase && resolvedHostId !== 'default') {
-      const { data } = await supabase.from('guests').insert([{
-        host_id: resolvedHostId,
-        name: guest.name,
-        status: guest.status,
-        confirmation_code: confirmationCode
-      }]).select().single();
-      
-      if (data) {
-        setGuests(prev => prev.map(g => g.id === tempId ? { ...g, id: data.id, confirmationCode: data.confirmation_code } : g));
+      try {
+        const { data } = await supabase.from('guests').insert([{
+          host_id: resolvedHostId,
+          name: guest.name,
+          status: guest.status || 'Confirmado',
+          confirmation_code: confirmationCode
+        }]).select().single();
+        
+        if (data) {
+          setGuests(prev => prev.map(g => g.id === tempId ? { ...g, id: data.id, confirmationCode: data.confirmation_code } : g));
+        }
+      } catch (err) {
+        console.warn("Could not insert guest in Supabase:", err);
       }
+    }
+
+    try {
+      const res = await fetch('/api/guests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hostId: resolvedHostId,
+          name: guest.name,
+          status: guest.status || 'Confirmado',
+          confirmationCode
+        })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.guest?.id) {
+          setGuests(prev => prev.map(g => g.id === tempId ? { ...g, id: d.guest.id } : g));
+        }
+      }
+    } catch {
+      // ignore
     }
   };
   
   const updateGuest = async (id: string, updates: Partial<Guest>) => {
     setGuests(prev => prev.map(g => g.id === id ? { ...g, ...updates } : g));
+    
+    // Only send defined fields to prevent overwriting not-null columns with null
+    const payload: any = {};
+    if (updates.name !== undefined) payload.name = updates.name;
+    if (updates.status !== undefined) payload.status = updates.status;
+    if (updates.confirmationCode !== undefined) payload.confirmation_code = updates.confirmationCode;
+
     if (supabase && resolvedHostId !== 'default' && id.length > 10) {
-      await supabase.from('guests').update({
-        name: updates.name,
-        status: updates.status
-      }).eq('id', id);
+      try {
+        await supabase.from('guests').update(payload).eq('id', id);
+      } catch (err) {
+        console.warn("Could not update guest in Supabase:", err);
+      }
+    }
+
+    try {
+      await fetch('/api/guests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update',
+          guestId: id,
+          status: updates.status,
+          name: updates.name,
+          hostId: resolvedHostId
+        })
+      });
+    } catch {
+      // ignore
     }
   };
   

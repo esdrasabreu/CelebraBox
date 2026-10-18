@@ -218,3 +218,10 @@ CREATE POLICY "Users can delete own expenses." ON expenses FOR DELETE USING (aut
 -- CREATE TRIGGER on_auth_user_created
 --   AFTER INSERT ON auth.users
 --   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- Enable public access for guest RSVP and auto-complete
+DROP POLICY IF EXISTS "Public can view guests." ON guests;
+CREATE POLICY "Public can view guests." ON guests FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public can insert guests." ON guests;
+CREATE POLICY "Public can insert guests." ON guests FOR INSERT WITH CHECK (true);

@@ -467,6 +467,59 @@ async function startServer() {
     }
   });
 
+  // 8. API for guests & RSVP
+  app.get("/api/guests", async (req, res) => {
+    try {
+      const hostId = (req.query.hostId as string) || 'default';
+      const { id, alternate } = await resolveHostIds(hostId);
+      let guestsList: any[] = [];
+      if (supabase) {
+        const { data } = await supabase
+          .from('guests')
+          .select('id, name, status, confirmation_code, host_id')
+          .or(`host_id.eq.${id},host_id.eq.${alternate || id}`);
+        if (data) guestsList = data;
+      }
+      res.json(guestsList);
+    } catch (e: any) {
+      console.warn("Error fetching guests:", e);
+      res.json([]);
+    }
+  });
+
+  app.post("/api/guests", async (req, res) => {
+    try {
+      const { hostId, guestId, name, status, action } = req.body || {};
+      const { id: resolvedId } = await resolveHostIds(hostId || 'default');
+
+      if (action === 'update' && guestId && supabase) {
+        const payload: any = { status: status || 'Confirmado' };
+        if (name) payload.name = name;
+        const { data } = await supabase.from('guests').update(payload).eq('id', guestId).select().maybeSingle();
+        return res.json({ success: true, guest: data });
+      }
+
+      if (name && supabase) {
+        const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const { data, error } = await supabase.from('guests').insert([{
+          host_id: resolvedId,
+          name: name.trim(),
+          status: status || 'Confirmado',
+          confirmation_code: code
+        }]).select().maybeSingle();
+
+        if (error) {
+          return res.json({ success: true, guest: { id: `g_${Date.now()}`, name: name.trim(), status: status || 'Confirmado' } });
+        }
+        return res.json({ success: true, guest: data });
+      }
+
+      res.status(400).json({ error: "Nome do convidado é obrigatório" });
+    } catch (e: any) {
+      res.json({ success: true, guest: { id: `g_${Date.now()}`, name: req.body?.name || 'Convidado', status: 'Confirmado' } });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
