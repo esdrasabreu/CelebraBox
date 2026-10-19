@@ -210,8 +210,18 @@ async function startServer() {
 
     if (externalReference && externalReference.includes(':')) {
       const parts = externalReference.split(':');
-      if (parts[0] && !hostId) hostId = parts[0];
-      if (parts[1] && !giftId) giftId = parts[1];
+      if (parts.length >= 2) {
+        if (!hostId) hostId = parts[0];
+        if (!giftId) giftId = parts[1];
+      }
+    }
+
+    // STRICT CHECK: Discard personal purchases, Mercado Livre, POTS, bank transfers
+    if (!giftId || !hostId || hostId === 'default') {
+      return; // Not a wedding gift transaction!
+    }
+    if (externalReference.startsWith('20000') || externalReference.startsWith('POTS') || externalReference.startsWith('11081')) {
+      return; // Discard Mercado Livre and Cofrinho transfers
     }
 
     if (status === 'approved') {
@@ -451,15 +461,44 @@ async function startServer() {
       const results = searchResult.results || [];
       let importedCount = 0;
 
+      const { id: resolvedId, alternate } = await resolveHostIds(hostId);
+
       for (const p of results) {
         if (p.status === 'approved') {
+          const extRef = (p.external_reference || '').trim();
+          let itemHostId = p.metadata?.host_id || '';
+          let giftId = p.metadata?.gift_id || '';
+
+          if (extRef && extRef.includes(':')) {
+            const parts = extRef.split(':');
+            if (parts.length >= 2) {
+              if (!itemHostId) itemHostId = parts[0];
+              if (!giftId) giftId = parts[1];
+            }
+          }
+
+          // STRICT CHECK: Discard personal purchases, Mercado Livre, POTS, bank transfers
+          if (!giftId || !itemHostId) continue;
+          if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) continue;
+
+          // STRICT HOST ISOLATION: Only import if it belongs to THIS host/account
+          const matchesThisHost = (
+            itemHostId === hostId ||
+            itemHostId === resolvedId ||
+            (alternate && itemHostId === alternate) ||
+            extRef.startsWith(`${hostId}:`) ||
+            extRef.startsWith(`${resolvedId}:`) ||
+            (alternate && extRef.startsWith(`${alternate}:`))
+          );
+
+          if (!matchesThisHost) continue;
+
           await handlePaymentConfirmation(p);
           importedCount++;
         }
       }
 
-      const { id, alternate } = await resolveHostIds(hostId);
-      const updatedTxs = getStoredTransactions(id, alternate);
+      const updatedTxs = getStoredTransactions(resolvedId, alternate);
       res.json({ success: true, importedCount, transactions: updatedTxs });
     } catch (err: any) {
       console.error("Error syncing Mercado Pago payments:", err);
@@ -489,34 +528,18 @@ async function startServer() {
 
   app.post("/api/guests", async (req, res) => {
     try {
-      const { hostId, guestId, name, status, action } = req.body || {};
-      const { id: resolvedId } = await resolveHostIds(hostId || 'default');
+      const { guestId, name, status } = req.body || {};
 
-      if (action === 'update' && guestId && supabase) {
+      if (guestId && supabase) {
         const payload: any = { status: status || 'Confirmado' };
         if (name) payload.name = name;
         const { data } = await supabase.from('guests').update(payload).eq('id', guestId).select().maybeSingle();
         return res.json({ success: true, guest: data });
       }
 
-      if (name && supabase) {
-        const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const { data, error } = await supabase.from('guests').insert([{
-          host_id: resolvedId,
-          name: name.trim(),
-          status: status || 'Confirmado',
-          confirmation_code: code
-        }]).select().maybeSingle();
-
-        if (error) {
-          return res.json({ success: true, guest: { id: `g_${Date.now()}`, name: name.trim(), status: status || 'Confirmado' } });
-        }
-        return res.json({ success: true, guest: data });
-      }
-
-      res.status(400).json({ error: "Nome do convidado é obrigatório" });
+      res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
     } catch (e: any) {
-      res.json({ success: true, guest: { id: `g_${Date.now()}`, name: req.body?.name || 'Convidado', status: 'Confirmado' } });
+      res.status(500).json({ error: e.message });
     }
   });
 

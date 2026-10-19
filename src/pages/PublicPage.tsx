@@ -183,25 +183,6 @@ export default function PublicPage() {
     }
   };
 
-  const handleRegisterAndConfirm = async (name: string, targetStatus: 'Confirmado' | 'Não vai' = 'Confirmado') => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setIsSubmittingRsvp(true);
-    try {
-      await addGuest({ name: trimmed, status: targetStatus });
-      setConfirmedGuestName(trimmed);
-      setRsvpStatus(targetStatus === 'Confirmado' ? 'success' : 'declined');
-      setSelectedGuest(null);
-      setRsvpQuery('');
-      setIsDropdownOpen(false);
-    } catch (err) {
-      console.warn("Error registering RSVP:", err);
-    } finally {
-      setIsSubmittingRsvp(false);
-      setTimeout(() => setRsvpStatus('idle'), 6000);
-    }
-  };
-
   const handleRsvpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedGuest) {
@@ -212,7 +193,7 @@ export default function PublicPage() {
     const searchInput = rsvpQuery.trim();
     if (!searchInput) return;
 
-    // Check exact or single partial match
+    // Check exact or single partial match from the guest list
     const searchName = normalizeStr(searchInput);
     let guest = guests.find(g => g.confirmationCode?.toLowerCase() === searchInput.toLowerCase());
     if (!guest) {
@@ -225,8 +206,9 @@ export default function PublicPage() {
     if (guest) {
       await handleConfirmRsvp(guest, 'Confirmado');
     } else {
-      // Auto-register so confirmation never fails on any account!
-      await handleRegisterAndConfirm(searchInput, 'Confirmado');
+      // Strictly require guest to be on the list - no self-inviting!
+      setRsvpStatus('not_found');
+      setTimeout(() => setRsvpStatus('idle'), 6000);
     }
   };
 
@@ -882,20 +864,15 @@ export default function PublicPage() {
                         </>
                       ) : null}
 
-                      {/* Fallback to confirm directly if name not found on pre-registered list */}
-                      <div className="p-3 bg-slate-50/80">
-                        <p className="text-xs text-slate-500 mb-2">
-                          {rsvpSuggestions.length > 0 ? 'Não é você?' : 'Nome não listado previamente?'} Você pode confirmar seu nome agora:
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => handleRegisterAndConfirm(rsvpQuery, 'Confirmado')}
-                          className="w-full py-2.5 px-3 bg-[#ef007e] hover:bg-[#d9006f] text-white rounded-xl text-xs font-semibold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          <Check className="w-4 h-4" />
-                          <span>Confirmar presença como "{rsvpQuery.trim()}"</span>
-                        </button>
-                      </div>
+                      {rsvpSuggestions.length === 0 && (
+                        <div className="p-4 text-center bg-slate-50/90">
+                          <AlertCircle className="w-5 h-5 text-amber-500 mx-auto mb-1.5" />
+                          <p className="text-xs font-semibold text-slate-700">Nome não encontrado na lista de convidados</p>
+                          <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                            Verifique a digitação ou consulte os anfitriões para confirmar seu convite.
+                          </p>
+                        </div>
+                      )}
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -978,6 +955,23 @@ export default function PublicPage() {
                     <p className="font-bold">Resposta registrada</p>
                     <p className="text-xs text-slate-600 mt-0.5">
                       Sentiremos sua falta! Obrigado por nos avisar com antecedência.
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Not Found Notification */}
+              {rsvpStatus === 'not_found' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-amber-900 text-sm font-medium bg-amber-50 p-4 rounded-2xl border border-amber-200 flex items-start gap-3 shadow-xs"
+                >
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Convidado não encontrado</p>
+                    <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                      Seu nome não foi localizado na lista oficial de convidados deste evento. Por favor, verifique a escrita do seu nome ou consulte os anfitriões para receber seu convite.
                     </p>
                   </div>
                 </motion.div>

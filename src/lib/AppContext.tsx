@@ -253,6 +253,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
               approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
             };
             serverTxs.forEach(st => {
+              const extRef = st.external_reference || '';
+              if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
+              if (st.host_id && st.host_id !== actualHostId && st.host_id !== resolvedHostId && !extRef.startsWith(`${actualHostId}:`) && !extRef.startsWith(`${resolvedHostId}:`)) {
+                return;
+              }
+
               const matchIdx = mergedTransactions.findIndex(mt =>
                 (st.payment_id && mt.payment_id === st.payment_id) ||
                 (st.external_reference && mt.external_reference === st.external_reference) ||
@@ -579,6 +585,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
         };
         serverTxs.forEach(st => {
+          const extRef = st.external_reference || '';
+          if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
+          if (st.host_id && st.host_id !== resolvedHostId && !extRef.startsWith(`${resolvedHostId}:`)) {
+            return;
+          }
+
           const matchIdx = merged.findIndex(mt =>
             (st.payment_id && mt.payment_id === st.payment_id) ||
             (st.external_reference && mt.external_reference === st.external_reference) ||

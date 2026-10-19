@@ -270,11 +270,13 @@ export function releaseReservation(reservationId: string, hostId?: string): bool
  */
 export function getStoredTransactions(hostId: string, alternateId?: string): StoredTransaction[] {
   const store = ensureStoreExists();
-  return store.transactions.filter(t => 
-    hostId === 'all' || 
-    t.host_id === hostId || 
-    (alternateId && t.host_id === alternateId)
-  );
+  return store.transactions.filter(t => {
+    if (!t.host_id || t.host_id.trim() === '') return false;
+    const extRef = t.external_reference || '';
+    if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return false;
+    if (hostId === 'all') return true;
+    return t.host_id === hostId || (alternateId && t.host_id === alternateId);
+  });
 }
 
 /**

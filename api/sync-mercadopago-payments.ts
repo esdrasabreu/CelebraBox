@@ -82,10 +82,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const results = searchResult.results || [];
     let importedCount = 0;
 
+    // Resolve target host UUID and Slug for strict account isolation
+    let targetUuid = hostId;
+    let targetSlug = hostId;
+    if (supabase && hostId && hostId !== 'default') {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
+      if (!isUuid) {
+        targetSlug = hostId;
+        try {
+          const { data: eventData } = await supabase.from('event_details').select('host_id').eq('slug', hostId).maybeSingle();
+          if (eventData?.host_id) targetUuid = eventData.host_id;
+        } catch (e) {}
+      } else {
+        targetUuid = hostId;
+        try {
+          const { data: eventData } = await supabase.from('event_details').select('slug').eq('host_id', hostId).maybeSingle();
+          if (eventData?.slug) targetSlug = eventData.slug;
+        } catch (e) {}
+      }
+    }
+
     for (const p of results) {
       if (p.status === 'approved') {
         const paymentId = String(p.id);
-        const externalReference = p.external_reference || '';
+        const externalReference = (p.external_reference || '').trim();
         const amount = Number(p.transaction_amount || 0);
 
         let methodFriendly = 'PIX';
@@ -101,19 +121,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (externalReference && externalReference.includes(':')) {
           const parts = externalReference.split(':');
-          if (parts[0] && !itemHostId) itemHostId = parts[0];
-          if (parts[1] && !giftId) giftId = parts[1];
-        }
-
-        // Target host matching: if hostId specified and not matching, skip
-        if (hostId && hostId !== 'default' && hostId !== 'all') {
-          if (itemHostId && itemHostId !== hostId && !externalReference.includes(hostId)) {
-            // Also check slug equivalence
-            continue;
+          if (parts.length >= 2) {
+            if (!itemHostId) itemHostId = parts[0];
+            if (!giftId) giftId = parts[1];
           }
         }
 
-        const effectiveHostId = itemHostId || hostId || 'default';
+        // STRICT VALIDATION: A transaction MUST be a wedding gift from our app!
+        // Ignore personal purchases (Mercado Livre, personal Pix, bank transfers, etc.)
+        if (!giftId || !itemHostId) {
+          continue; // Discard: not a wedding gift!
+        }
+        if (externalReference.startsWith('20000') || externalReference.startsWith('POTS') || externalReference.startsWith('11081')) {
+          continue; // Discard Mercado Livre and Cofrinho transfers
+        }
+
+        // STRICT ACCOUNT ISOLATION: Each account ONLY sees gifts sold on ITS OWN list!
+        const matchesThisHost = (
+          itemHostId === hostId ||
+          (targetSlug && itemHostId === targetSlug) ||
+          (targetUuid && itemHostId === targetUuid) ||
+          externalReference.startsWith(`${hostId}:`) ||
+          (targetSlug && externalReference.startsWith(`${targetSlug}:`)) ||
+          (targetUuid && externalReference.startsWith(`${targetUuid}:`))
+        );
+
+        if (!matchesThisHost) {
+          continue; // Discard: belongs to another event/host!
+        }
+
+        const effectiveHostId = targetUuid || targetSlug || hostId;
 
         // 1. Sync to Supabase
         if (supabase) {

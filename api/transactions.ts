@@ -20,48 +20,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }) : null;
 
   let transactions: any[] = [];
+  let targetUuid = hostId;
+  let targetSlug = hostId;
 
-  // Try reading from Supabase
+  // Resolve UUID & Slug for target host
+  if (supabase && hostId && hostId !== 'default') {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
+    if (!isUuid) {
+      targetSlug = hostId;
+      try {
+        const { data: eventData } = await supabase.from('event_details').select('host_id').eq('slug', hostId).maybeSingle();
+        if (eventData?.host_id) targetUuid = eventData.host_id;
+      } catch (e) {}
+    } else {
+      targetUuid = hostId;
+      try {
+        const { data: eventData } = await supabase.from('event_details').select('slug').eq('host_id', hostId).maybeSingle();
+        if (eventData?.slug) targetSlug = eventData.slug;
+      } catch (e) {}
+    }
+  }
+
+  // 1. Try reading from Supabase
   if (supabase && hostId && hostId !== 'default') {
     try {
-      // Determine if hostId is slug or UUID
-      let actualHostId = hostId;
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
-      if (!isUuid) {
-        const { data: eventData } = await supabase.from('event_details').select('host_id').eq('slug', hostId).maybeSingle();
-        if (eventData?.host_id) actualHostId = eventData.host_id;
-      }
-
       const { data } = await supabase
         .from('transactions')
         .select('*')
-        .or(`host_id.eq.${actualHostId},host_id.eq.${hostId}`);
+        .or(`host_id.eq.${targetUuid},host_id.eq.${targetSlug}`);
 
       if (data && data.length > 0) {
-        transactions = data.map(t => ({
-          id: t.id,
-          host_id: t.host_id,
-          gift_id: t.gift_id,
-          giftTitle: t.gift_title,
-          donorName: t.donor_name,
-          amount: t.amount,
-          method: t.method,
-          status: t.status,
-          date: t.date,
-          payment_id: t.payment_id,
-          external_reference: t.external_reference
-        }));
+        transactions = data
+          .filter(t => {
+            // Discard any personal / Mercado Livre purchases
+            const extRef = t.external_reference || '';
+            if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return false;
+            return true;
+          })
+          .map(t => ({
+            id: t.id,
+            host_id: t.host_id,
+            gift_id: t.gift_id,
+            giftTitle: t.gift_title,
+            donorName: t.donor_name,
+            amount: t.amount,
+            method: t.method,
+            status: t.status,
+            date: t.date,
+            payment_id: t.payment_id,
+            external_reference: t.external_reference
+          }));
       }
     } catch (e) {
       console.warn("Could not fetch transactions from Supabase:", e);
     }
   }
 
-  // Also try local server store fallback if available
+  // 2. Also try local server store fallback if available
   try {
     const { getStoredTransactions } = await import('../server_store');
-    const localTxs = getStoredTransactions(hostId);
+    const localTxs = getStoredTransactions(targetUuid, targetSlug);
     localTxs.forEach(lt => {
+      if (!lt.host_id || lt.host_id.trim() === '') return;
+      if (lt.host_id !== targetUuid && lt.host_id !== targetSlug) return;
+      const extRef = lt.external_reference || '';
+      if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
+
       const exists = transactions.some(t => 
         (lt.payment_id && t.payment_id === lt.payment_id) || 
         (lt.external_reference && t.external_reference === lt.external_reference)
