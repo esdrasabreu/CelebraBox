@@ -43,22 +43,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // 1. POST: Only update status of pre-registered guest (NO self-invitations!)
-  if (req.method === 'POST') {
-    const { guestId, name, status } = req.body || {};
+  // 1. Sync or update guest status
+  if (req.method === 'POST' || req.method === 'PUT') {
+    const { action, guests: incomingGuests, guestId, name, status } = req.body || {};
 
-    if (guestId && supabase) {
+    // Sync full list from host dashboard
+    if (action === 'sync' || Array.isArray(incomingGuests)) {
       try {
-        const payload: any = { status: status || 'Confirmado' };
-        if (name) payload.name = name;
-        const { data, error } = await supabase.from('guests').update(payload).eq('id', guestId).select().maybeSingle();
-        if (error) {
-          console.warn("Could not update guest in Supabase:", error);
-        }
-        return res.status(200).json({ success: true, guest: data });
-      } catch (err: any) {
-        return res.status(500).json({ error: "Erro ao atualizar confirmação", details: err?.message });
+        const { saveStoredGuests } = await import('../server_store');
+        saveStoredGuests(targetUuid || hostId, incomingGuests || []);
+      } catch {
+        // read-only fallback
       }
+      return res.status(200).json({ success: true, count: (incomingGuests || []).length });
+    }
+
+    // Only update status of pre-registered guest (NO self-invitations!)
+    if (guestId) {
+      const targetStatus = status || 'Confirmado';
+
+      try {
+        const { updateStoredGuestStatus } = await import('../server_store');
+        updateStoredGuestStatus(guestId, targetStatus);
+      } catch {
+        // ignore
+      }
+
+      if (supabase) {
+        try {
+          const payload: any = { status: targetStatus };
+          if (name) payload.name = name;
+          const { data, error } = await supabase.from('guests').update(payload).eq('id', guestId).select().maybeSingle();
+          if (error) {
+            console.warn("Could not update guest in Supabase:", error);
+          }
+          return res.status(200).json({ success: true, guest: data });
+        } catch (err: any) {
+          console.warn("Error updating Supabase guest:", err);
+        }
+      }
+      return res.status(200).json({ success: true });
     }
 
     return res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
@@ -84,6 +108,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (e) {
       console.warn("Error querying guests from Supabase:", e);
     }
+  }
+
+  // Fallback to server store if Supabase returned 0 due to public anon restrictions
+  try {
+    const { getStoredGuests } = await import('../server_store');
+    const stored = getStoredGuests(targetUuid || hostId, targetSlug);
+    if (stored && stored.length > 0) {
+      stored.forEach(sg => {
+        const exists = guests.some(g => g.id === sg.id || g.name.toLowerCase() === sg.name.toLowerCase());
+        if (!exists) {
+          guests.push({
+            id: sg.id,
+            name: sg.name,
+            status: sg.status,
+            confirmationCode: sg.confirmation_code
+          });
+        }
+      });
+    }
+  } catch {
+    // ignore
   }
 
   return res.status(200).json(guests);

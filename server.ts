@@ -13,7 +13,10 @@ import {
   getStoredReservations,
   getActiveReservationsCount,
   getStockDeductions,
-  cleanExpiredReservations
+  cleanExpiredReservations,
+  getStoredGuests,
+  saveStoredGuests,
+  updateStoredGuestStatus
 } from './server_store';
 
 dotenv.config();
@@ -262,12 +265,24 @@ async function startServer() {
       // 3. Insert or update transaction in Supabase with all tracking fields
       if (supabase && hostId) {
         try {
-          // Check if already recorded (avoid duplicates using payment_id)
-          const { data: existingTx } = await supabase
-            .from('transactions')
-            .select('id')
-            .eq('payment_id', paymentId)
-            .maybeSingle();
+          // Check if already recorded (by payment_id OR external_reference)
+          let existingTx: any = null;
+          if (paymentId) {
+            const { data } = await supabase
+              .from('transactions')
+              .select('id, status')
+              .eq('payment_id', paymentId)
+              .maybeSingle();
+            existingTx = data;
+          }
+          if (!existingTx && externalReference) {
+            const { data } = await supabase
+              .from('transactions')
+              .select('id, status')
+              .eq('external_reference', externalReference)
+              .maybeSingle();
+            existingTx = data;
+          }
 
           if (!existingTx) {
             await supabase.from('transactions').insert([{
@@ -282,10 +297,17 @@ async function startServer() {
               external_reference: externalReference || null
             }]);
           } else {
-            // Update existing record to approved if it was pending
+            // Upgrade existing record to approved
             await supabase.from('transactions')
-              .update({ status: 'approved', method: methodFriendly, amount: amount })
-              .eq('payment_id', paymentId);
+              .update({
+                status: 'approved',
+                method: methodFriendly,
+                amount: amount,
+                payment_id: paymentId,
+                donor_name: donorName,
+                gift_title: giftTitle
+              })
+              .eq('id', existingTx.id);
           }
         } catch (supabaseTxErr) {
           console.warn("Could not insert/update transaction in Supabase (will rely on server store):", supabaseTxErr);
@@ -438,14 +460,14 @@ async function startServer() {
   // 7. API to sync live approved payments directly from Mercado Pago
   app.post("/api/sync-mercadopago-payments", async (req, res) => {
     try {
-      const { hostId = 'default' } = req.body;
-      const accessToken = await resolveAccessToken(hostId);
+      const { hostId = 'default', gatewayAccessToken } = req.body;
+      const accessToken = await resolveAccessToken(hostId, gatewayAccessToken);
 
       if (!accessToken) {
         return res.status(400).json({ error: "No Mercado Pago Access Token configured" });
       }
 
-      const client = new MercadoPagoConfig({ accessToken, options: { timeout: 10000 } });
+      const client = new MercadoPagoConfig({ accessToken, options: { timeout: 15000 } });
       const paymentClient = new Payment(client);
 
       const searchResult = await paymentClient.search({
@@ -479,7 +501,7 @@ async function startServer() {
 
           // STRICT CHECK: Discard personal purchases, Mercado Livre, POTS, bank transfers
           if (!giftId || !itemHostId) continue;
-          if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) continue;
+          if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) continue;
 
           // STRICT HOST ISOLATION: Only import if it belongs to THIS host/account
           const matchesThisHost = (
@@ -512,13 +534,48 @@ async function startServer() {
       const hostId = (req.query.hostId as string) || 'default';
       const { id, alternate } = await resolveHostIds(hostId);
       let guestsList: any[] = [];
+
+      // 1. Check Supabase (if available and authenticated)
       if (supabase) {
-        const { data } = await supabase
-          .from('guests')
-          .select('id, name, status, confirmation_code, host_id')
-          .or(`host_id.eq.${id},host_id.eq.${alternate || id}`);
-        if (data) guestsList = data;
+        try {
+          const authHeader = req.headers.authorization;
+          const client = authHeader ? createClient(process.env.VITE_SUPABASE_URL || '', process.env.VITE_SUPABASE_ANON_KEY || '', {
+            global: { headers: { Authorization: authHeader } }
+          }) : supabase;
+
+          const { data } = await client
+            .from('guests')
+            .select('id, name, status, confirmation_code, host_id')
+            .or(`host_id.eq.${id},host_id.eq.${alternate || id}`);
+          if (data && data.length > 0) {
+            guestsList = data.map(g => ({
+              id: g.id,
+              name: g.name,
+              status: g.status,
+              confirmationCode: g.confirmation_code
+            }));
+          }
+        } catch (dbErr) {
+          console.warn("Could not query guests from Supabase:", dbErr);
+        }
       }
+
+      // 2. Merge with server store (ensures guests are always found even if unauthenticated)
+      const storedGuests = getStoredGuests(id, alternate);
+      if (storedGuests && storedGuests.length > 0) {
+        storedGuests.forEach(sg => {
+          const exists = guestsList.some(g => g.id === sg.id || g.name.toLowerCase() === sg.name.toLowerCase());
+          if (!exists) {
+            guestsList.push({
+              id: sg.id,
+              name: sg.name,
+              status: sg.status,
+              confirmationCode: sg.confirmation_code
+            });
+          }
+        });
+      }
+
       res.json(guestsList);
     } catch (e: any) {
       console.warn("Error fetching guests:", e);
@@ -526,18 +583,44 @@ async function startServer() {
     }
   });
 
+  // Sync guests from admin host dashboard to persistent backend
+  app.post("/api/guests/sync", async (req, res) => {
+    try {
+      const { hostId, guests } = req.body || {};
+      if (hostId && Array.isArray(guests)) {
+        const { id } = await resolveHostIds(hostId);
+        saveStoredGuests(id, guests);
+        return res.json({ success: true, count: guests.length });
+      }
+      res.status(400).json({ error: "Invalid payload" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Guest confirmation submission (strictly pre-registered guests only)
   app.post("/api/guests", async (req, res) => {
     try {
       const { guestId, name, status } = req.body || {};
 
-      if (guestId && supabase) {
-        const payload: any = { status: status || 'Confirmado' };
-        if (name) payload.name = name;
-        const { data } = await supabase.from('guests').update(payload).eq('id', guestId).select().maybeSingle();
-        return res.json({ success: true, guest: data });
+      if (!guestId) {
+        return res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
       }
 
-      res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
+      const targetStatus = status || 'Confirmado';
+      updateStoredGuestStatus(guestId, targetStatus);
+
+      if (supabase) {
+        try {
+          const payload: any = { status: targetStatus };
+          if (name) payload.name = name;
+          await supabase.from('guests').update(payload).eq('id', guestId);
+        } catch (supErr) {
+          console.warn("Supabase guest update warning:", supErr);
+        }
+      }
+
+      return res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

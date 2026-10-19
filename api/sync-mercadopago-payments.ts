@@ -155,12 +155,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // 1. Sync to Supabase
         if (supabase) {
           try {
-            // Check if already recorded
-            const { data: existingTx } = await supabase
-              .from('transactions')
-              .select('id, status')
-              .eq('payment_id', paymentId)
-              .maybeSingle();
+            // Check if already recorded by payment_id OR external_reference
+            let existingTx: any = null;
+            if (paymentId) {
+              const { data } = await supabase
+                .from('transactions')
+                .select('id, status')
+                .eq('payment_id', paymentId)
+                .maybeSingle();
+              existingTx = data;
+            }
+            if (!existingTx && externalReference) {
+              const { data } = await supabase
+                .from('transactions')
+                .select('id, status')
+                .eq('external_reference', externalReference)
+                .maybeSingle();
+              existingTx = data;
+            }
 
             if (!existingTx) {
               await supabase.from('transactions').insert([{
@@ -176,10 +188,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 date: p.date_approved || p.date_created || new Date().toISOString()
               }]);
               importedCount++;
-            } else if (existingTx.status !== 'approved' && existingTx.status !== 'Concluído') {
+            } else {
+              // Upgrade the existing pending record to approved!
               await supabase.from('transactions')
-                .update({ status: 'approved', method: methodFriendly, amount: amount })
-                .eq('payment_id', paymentId);
+                .update({
+                  status: 'approved',
+                  method: methodFriendly,
+                  amount: amount,
+                  payment_id: paymentId,
+                  donor_name: donorName,
+                  gift_title: giftTitle,
+                  date: p.date_approved || p.date_created || new Date().toISOString()
+                })
+                .eq('id', existingTx.id);
               importedCount++;
             }
 
@@ -234,27 +255,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: txList } = await supabase
           .from('transactions')
           .select('*')
-          .eq('host_id', hostId);
+          .or(`host_id.eq.${targetUuid},host_id.eq.${targetSlug}`);
 
         if (txList && txList.length > 0) {
-          transactions = txList.map(t => ({
-            id: t.id,
-            host_id: t.host_id,
-            gift_id: t.gift_id,
-            giftTitle: t.gift_title,
-            donorName: t.donor_name,
-            amount: t.amount,
-            method: t.method,
-            status: t.status,
-            date: t.date,
-            payment_id: t.payment_id,
-            external_reference: t.external_reference
-          }));
+          transactions = txList
+            .filter(t => {
+              const ext = t.external_reference || '';
+              return !ext.startsWith('20000') && !ext.startsWith('POTS') && !ext.startsWith('11081');
+            })
+            .map(t => ({
+              id: t.id,
+              host_id: t.host_id,
+              gift_id: t.gift_id,
+              giftTitle: t.gift_title,
+              donorName: t.donor_name,
+              amount: t.amount,
+              method: t.method,
+              status: t.status,
+              date: t.date,
+              payment_id: t.payment_id,
+              external_reference: t.external_reference
+            }));
         }
       } catch (err) {
         console.warn("Could not query updated transactions from Supabase:", err);
       }
     }
+
+    // Also include from local store
+    try {
+      const { getStoredTransactions } = await import('../server_store');
+      const localTxs = getStoredTransactions(targetUuid, targetSlug);
+      localTxs.forEach(lt => {
+        const exists = transactions.some(t =>
+          (lt.payment_id && t.payment_id === lt.payment_id) ||
+          (lt.external_reference && t.external_reference === lt.external_reference)
+        );
+        if (!exists) transactions.unshift(lt);
+      });
+    } catch {}
 
     return res.status(200).json({
       success: true,

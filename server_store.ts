@@ -28,13 +28,23 @@ export interface StoredTransaction {
   external_reference?: string;
 }
 
+export interface StoredGuest {
+  id: string;
+  host_id: string;
+  name: string;
+  status: 'Pendente' | 'Confirmado' | 'Não vai';
+  confirmation_code?: string;
+}
+
 interface AppStoreData {
   reservations: GiftReservation[];
   transactions: StoredTransaction[];
   stockDeductions: Record<string, number>; // giftId -> count of deducted units
+  guests?: StoredGuest[];
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+// In Vercel serverless functions, the root filesystem is read-only; /tmp is writable
+const DATA_DIR = process.env.VERCEL ? path.join('/tmp', 'celebra_data') : path.join(process.cwd(), 'data');
 const STORE_FILE = path.join(DATA_DIR, 'app_store.json');
 
 function ensureStoreExists(): AppStoreData {
@@ -46,9 +56,14 @@ function ensureStoreExists(): AppStoreData {
       const initial: AppStoreData = {
         reservations: [],
         transactions: [],
-        stockDeductions: {}
+        stockDeductions: {},
+        guests: []
       };
-      fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2), 'utf8');
+      try {
+        fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2), 'utf8');
+      } catch (writeErr) {
+        // Read-only or restricted environment fallback
+      }
       return initial;
     }
     const raw = fs.readFileSync(STORE_FILE, 'utf8');
@@ -56,11 +71,12 @@ function ensureStoreExists(): AppStoreData {
     return {
       reservations: parsed.reservations || [],
       transactions: parsed.transactions || [],
-      stockDeductions: parsed.stockDeductions || {}
+      stockDeductions: parsed.stockDeductions || {},
+      guests: parsed.guests || []
     };
   } catch (err) {
     console.error("Error accessing app store:", err);
-    return { reservations: [], transactions: [], stockDeductions: {} };
+    return { reservations: [], transactions: [], stockDeductions: {}, guests: [] };
   }
 }
 
@@ -73,7 +89,8 @@ function saveStore(data: AppStoreData) {
     fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
     fs.renameSync(tempFile, STORE_FILE);
   } catch (err) {
-    console.error("Error saving app store:", err);
+    // Non-fatal warning on read-only environments
+    console.warn("Notice: Local store save skipped or unavailable in current environment:", err);
   }
 }
 
@@ -202,7 +219,7 @@ export function confirmPayment(params: {
     store.stockDeductions[params.giftId] = (store.stockDeductions[params.giftId] || 0) + 1;
   }
 
-  // 3. Update or insert transaction
+  // 3. Update existing transaction or insert new approved transaction
   let tx = store.transactions.find(t => 
     (params.paymentId && t.payment_id === params.paymentId) ||
     (params.externalReference && t.external_reference === params.externalReference)
@@ -210,7 +227,7 @@ export function confirmPayment(params: {
 
   if (tx) {
     tx.status = 'approved';
-    tx.method = params.method;
+    tx.method = params.method || 'PIX';
     tx.amount = params.amount || tx.amount;
     tx.payment_id = params.paymentId;
     tx.date = date;
@@ -235,6 +252,17 @@ export function confirmPayment(params: {
       external_reference: params.externalReference
     };
     store.transactions.unshift(tx);
+  }
+
+  // Clean obsolete pending duplicates that matched this external_reference or payment_id
+  if (params.externalReference) {
+    store.transactions = store.transactions.filter(t => {
+      if (t === tx) return true;
+      if (t.external_reference === params.externalReference && t.status !== 'approved') {
+        return false; // Eliminate obsolete pending clone
+      }
+      return true;
+    });
   }
 
   saveStore(store);
@@ -266,17 +294,57 @@ export function releaseReservation(reservationId: string, hostId?: string): bool
 }
 
 /**
- * Gets all transactions for a host (supporting both UUID and slug).
+ * Gets all transactions for a host (supporting both UUID and slug),
+ * automatically deduplicating and promoting approved payments over stale pending items.
  */
 export function getStoredTransactions(hostId: string, alternateId?: string): StoredTransaction[] {
   const store = ensureStoreExists();
-  return store.transactions.filter(t => {
+  const matched = store.transactions.filter(t => {
     if (!t.host_id || t.host_id.trim() === '') return false;
     const extRef = t.external_reference || '';
     if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return false;
     if (hostId === 'all') return true;
-    return t.host_id === hostId || (alternateId && t.host_id === alternateId);
+    return (
+      t.host_id === hostId ||
+      (alternateId && t.host_id === alternateId) ||
+      (extRef.startsWith(`${hostId}:`)) ||
+      (alternateId && extRef.startsWith(`${alternateId}:`))
+    );
   });
+
+  // Track approved external_references and payment_ids
+  const approvedRefs = new Set<string>();
+  const approvedPaymentIds = new Set<string>();
+
+  matched.forEach(t => {
+    if (t.status === 'approved') {
+      if (t.external_reference) approvedRefs.add(t.external_reference);
+      if (t.payment_id) approvedPaymentIds.add(t.payment_id);
+    }
+  });
+
+  // Filter out pending/checkout_started clones if an approved version exists
+  const deduplicated: StoredTransaction[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const t of matched) {
+    if (t.status !== 'approved') {
+      if (t.external_reference && approvedRefs.has(t.external_reference)) {
+        continue; // Discard obsolete pending clone
+      }
+      if (t.payment_id && approvedPaymentIds.has(t.payment_id)) {
+        continue;
+      }
+    }
+
+    const key = t.payment_id ? `pid_${t.payment_id}` : (t.external_reference ? `ref_${t.external_reference}` : `id_${t.id}`);
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      deduplicated.push(t);
+    }
+  }
+
+  return deduplicated;
 }
 
 /**
@@ -298,4 +366,55 @@ export function getStoredReservations(hostId: string, alternateId?: string): Gif
 export function getStockDeductions(): Record<string, number> {
   const store = ensureStoreExists();
   return store.stockDeductions;
+}
+
+/**
+ * Retrieves all stored guests for a host.
+ */
+export function getStoredGuests(hostId: string, alternateId?: string): StoredGuest[] {
+  const store = ensureStoreExists();
+  const guests = store.guests || [];
+  return guests.filter(g => 
+    g.host_id === hostId || (alternateId && g.host_id === alternateId)
+  );
+}
+
+/**
+ * Synchronizes host guests into the server store.
+ */
+export function saveStoredGuests(hostId: string, guests: StoredGuest[]): void {
+  const store = ensureStoreExists();
+  if (!store.guests) store.guests = [];
+
+  // Remove existing guests for this host
+  store.guests = store.guests.filter(g => g.host_id !== hostId);
+
+  // Add updated guests
+  guests.forEach(g => {
+    store.guests!.push({
+      id: g.id || Math.random().toString(36).substring(2, 9),
+      host_id: hostId,
+      name: g.name.trim(),
+      status: g.status || 'Pendente',
+      confirmation_code: g.confirmation_code
+    });
+  });
+
+  saveStore(store);
+}
+
+/**
+ * Updates confirmation status of a stored guest.
+ */
+export function updateStoredGuestStatus(guestId: string, status: 'Pendente' | 'Confirmado' | 'Não vai'): boolean {
+  const store = ensureStoreExists();
+  if (!store.guests) return false;
+
+  const guest = store.guests.find(g => g.id === guestId);
+  if (guest) {
+    guest.status = status;
+    saveStore(store);
+    return true;
+  }
+  return false;
 }

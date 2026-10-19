@@ -62,7 +62,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (status === 'approved' && supabase) {
         try {
-          const { data: existing } = await supabase.from('transactions').select('id').eq('payment_id', String(paymentId)).maybeSingle();
+          let existing: any = null;
+          if (paymentId) {
+            const { data } = await supabase.from('transactions').select('id').eq('payment_id', String(paymentId)).maybeSingle();
+            existing = data;
+          }
+          if (!existing && externalReference) {
+            const { data } = await supabase.from('transactions').select('id').eq('external_reference', externalReference).maybeSingle();
+            existing = data;
+          }
+
           if (!existing) {
             await supabase.from('transactions').insert([{
               host_id: targetHost,
@@ -77,7 +86,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               date: paymentInfo.date_approved || paymentInfo.date_created
             }]);
           } else {
-            await supabase.from('transactions').update({ status: 'approved', method: methodFriendly, amount }).eq('payment_id', String(paymentId));
+            await supabase.from('transactions').update({
+              status: 'approved',
+              method: methodFriendly,
+              amount,
+              payment_id: String(paymentId)
+            }).eq('id', existing.id);
           }
 
           if (giftId) {

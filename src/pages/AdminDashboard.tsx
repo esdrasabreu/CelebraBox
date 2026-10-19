@@ -103,7 +103,7 @@ export default function AdminDashboard() {
 
       const data = await res.json();
       if (data.success) {
-        await refreshTransactions();
+        await refreshTransactions(data.transactions);
         await refreshReservations();
         if (!silent) {
           toast.success(`Sincronização concluída! ${data.importedCount || 0} pagamento(s) aprovado(s) verificado(s).`);
@@ -635,7 +635,7 @@ export default function AdminDashboard() {
                   <Gift className="w-5 h-5 text-[#ef007e]" />
                   <span className="font-medium text-sm">Presentes Recebidos</span>
                 </div>
-                <div className="text-3xl font-bold text-slate-800">{transactions.length}</div>
+                <div className="text-3xl font-bold text-slate-800">{approvedTransactions.length}</div>
               </div>
             </div>
 

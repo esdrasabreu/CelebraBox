@@ -84,13 +84,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!lt.host_id || lt.host_id.trim() === '') return;
       if (lt.host_id !== targetUuid && lt.host_id !== targetSlug) return;
       const extRef = lt.external_reference || '';
-      if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
+      if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return;
 
-      const exists = transactions.some(t => 
+      const matchIdx = transactions.findIndex(t => 
         (lt.payment_id && t.payment_id === lt.payment_id) || 
         (lt.external_reference && t.external_reference === lt.external_reference)
       );
-      if (!exists) transactions.unshift(lt);
+      if (matchIdx === -1) {
+        transactions.unshift(lt);
+      } else if (lt.status === 'approved' && transactions[matchIdx].status !== 'approved') {
+        transactions[matchIdx] = { ...transactions[matchIdx], ...lt };
+      }
     });
   } catch {
     // Read-only serverless environment

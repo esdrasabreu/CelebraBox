@@ -25,7 +25,7 @@ type AppContextType = {
   
   transactions: Transaction[];
   addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => Promise<void>;
-  refreshTransactions: () => Promise<void>;
+  refreshTransactions: (freshTxs?: Transaction[]) => Promise<void>;
 
   reservations: any[];
   refreshReservations: () => Promise<void>;
@@ -53,6 +53,98 @@ type AppContextType = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+export function reconcileTransactions(
+  txs: Transaction[],
+  targetHostId: string,
+  targetSlug?: string
+): Transaction[] {
+  // 1. Exclude Mercado Livre, personal bank transfers, POTS, etc.
+  const valid = txs.filter(t => {
+    const extRef = (t.external_reference || '').trim();
+    if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
+    
+    if (targetHostId !== 'default') {
+      if (t.id === 'tx1' || t.id === 'tx2') return false;
+      
+      const belongs = (
+        !t.host_id ||
+        t.host_id === targetHostId ||
+        (targetSlug && t.host_id === targetSlug) ||
+        extRef.startsWith(`${targetHostId}:`) ||
+        (targetSlug && extRef.startsWith(`${targetSlug}:`))
+      );
+      if (!belongs) return false;
+    }
+    return true;
+  });
+
+  // 2. Identify all approved transactions and their matching keys
+  const approvedRefs = new Set<string>();
+  const approvedPids = new Set<string>();
+  const approvedGiftSignatures = new Map<string, { method: string, payment_id?: string }>();
+
+  valid.forEach(t => {
+    if (t.status === 'approved' || t.status === 'Concluído') {
+      if (t.payment_id) approvedPids.add(t.payment_id);
+      if (t.external_reference) approvedRefs.add(t.external_reference);
+      const sig = `${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`;
+      approvedGiftSignatures.set(sig, {
+        method: t.method === 'Aguardando' ? 'PIX' : t.method,
+        payment_id: t.payment_id
+      });
+    }
+  });
+
+  // 3. Upgrade any pending transaction that has an approved match
+  const upgraded = valid.map(t => {
+    if (t.status !== 'approved' && t.status !== 'Concluído') {
+      const sig = `${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`;
+      const hasRefMatch = t.external_reference && approvedRefs.has(t.external_reference);
+      const hasPidMatch = t.payment_id && approvedPids.has(t.payment_id);
+      const hasSigMatch = approvedGiftSignatures.has(sig);
+
+      if (hasRefMatch || hasPidMatch || hasSigMatch) {
+        const matchInfo = approvedGiftSignatures.get(sig);
+        return {
+          ...t,
+          status: 'approved' as const,
+          method: (t.method === 'Aguardando' || !t.method ? (matchInfo?.method || 'PIX') : t.method) as any,
+          payment_id: t.payment_id || matchInfo?.payment_id
+        };
+      }
+    }
+    return t;
+  });
+
+  // 4. Deduplicate: only 1 entry per payment_id or external_reference, approved taking priority
+  const deduplicated: Transaction[] = [];
+  const seenKeys = new Set<string>();
+
+  // Sort approved first so they take priority
+  const sorted = [...upgraded].sort((a, b) => {
+    const aApp = a.status === 'approved' || a.status === 'Concluído' ? 1 : 0;
+    const bApp = b.status === 'approved' || b.status === 'Concluído' ? 1 : 0;
+    if (aApp !== bApp) return bApp - aApp;
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
+
+  for (const t of sorted) {
+    // If pending and an approved version with same external_reference or payment_id exists, drop pending copy
+    if (t.status !== 'approved' && t.status !== 'Concluído') {
+      if (t.external_reference && approvedRefs.has(t.external_reference)) continue;
+      if (t.payment_id && approvedPids.has(t.payment_id)) continue;
+    }
+
+    const key = t.payment_id ? `pid_${t.payment_id}` : (t.external_reference ? `ref_${t.external_reference}` : `id_${t.id}`);
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      deduplicated.push(t);
+    }
+  }
+
+  return deduplicated.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string }> = ({ children, hostId = 'default' }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isNotFound, setIsNotFound] = useState(false);
@@ -72,7 +164,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   const [gifts, setGifts] = useState<Gift[]>(() => loadState('gifts', initialGifts));
   const [messages, setMessages] = useState<Message[]>(() => loadState('messages', initialMessages));
   const [guests, setGuests] = useState<Guest[]>(() => loadState('guests', initialGuests));
-  const [transactions, setTransactions] = useState<Transaction[]>(() => loadState('transactions', initialTransactions));
+  const [transactions, setTransactions] = useState<Transaction[]>(() => loadState('transactions', hostId === 'default' ? initialTransactions : []));
   const [reservations, setReservations] = useState<any[]>([]);
   const [paymentSettings, setPaymentSettingsState] = useState<PaymentSettings>(() => loadState('payment_settings', initialPaymentSettings));
   const [gallery, setGallery] = useState<GalleryImage[]>(() => loadState('gallery', initialGallery));
@@ -226,8 +318,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         }
 
         setGuests(loadedGuests);
+        if (loadedGuests.length > 0) {
+          // Sync with server store in background for public page availability across accounts
+          fetch('/api/guests/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hostId: actualHostId, guests: loadedGuests })
+          }).catch(() => {});
+        }
         
-        let mergedTransactions: Transaction[] = txData && txData.length > 0 ? txData.map(t => ({
+        let txList: Transaction[] = txData && txData.length > 0 ? txData.map(t => ({
           id: t.id,
           giftTitle: t.gift_title,
           donorName: t.donor_name,
@@ -248,33 +348,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
           if (txServerRes.ok) {
             const serverTxs: any[] = await txServerRes.json();
-            const statusRank: Record<string, number> = {
-              checkout_started: 0, pending: 1, in_process: 2,
-              approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
-            };
-            serverTxs.forEach(st => {
-              const extRef = st.external_reference || '';
-              if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
-              if (st.host_id && st.host_id !== actualHostId && st.host_id !== resolvedHostId && !extRef.startsWith(`${actualHostId}:`) && !extRef.startsWith(`${resolvedHostId}:`)) {
-                return;
-              }
-
-              const matchIdx = mergedTransactions.findIndex(mt =>
-                (st.payment_id && mt.payment_id === st.payment_id) ||
-                (st.external_reference && mt.external_reference === st.external_reference) ||
-                (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
-              );
-              if (matchIdx === -1) {
-                mergedTransactions.unshift(st);
-              } else {
-                // Upgrade status if the incoming record is more final
-                const existingRank = statusRank[mergedTransactions[matchIdx].status] ?? 0;
-                const incomingRank = statusRank[st.status] ?? 0;
-                if (incomingRank > existingRank) {
-                  mergedTransactions[matchIdx] = { ...mergedTransactions[matchIdx], ...st };
-                }
-              }
-            });
+            if (Array.isArray(serverTxs)) {
+              txList.push(...serverTxs);
+            }
           }
 
           if (resRes.ok) {
@@ -285,7 +361,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           console.warn("Could not fetch server transactions/reservations:", fetchServerErr);
         }
 
-        setTransactions(mergedTransactions);
+        // Include locally cached transactions
+        const cachedTxs = loadState<Transaction[]>('transactions', []);
+        if (cachedTxs && cachedTxs.length > 0) {
+          txList.push(...cachedTxs);
+        }
+
+        // Reconcile and deduplicate: upgrade pending to approved if paid, eliminate clones
+        const finalTxs = reconcileTransactions(txList, actualHostId, eventData?.slug);
+
+        setTransactions(finalTxs);
+        try {
+          localStorage.setItem(`wedding_tech_${actualHostId}_transactions`, JSON.stringify(finalTxs));
+          if (eventData?.slug) {
+            localStorage.setItem(`wedding_tech_${eventData.slug}_transactions`, JSON.stringify(finalTxs));
+          }
+        } catch {}
         
         setGallery(galleryData && galleryData.length > 0 ? galleryData.map(g => ({
           id: g.id,
@@ -552,65 +643,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     }
   };
 
-  const refreshTransactions = async () => {
+  const refreshTransactions = async (freshTxs?: Transaction[]) => {
     if (!resolvedHostId) return;
     try {
+      const currentSlug = eventDetails?.slug || '';
       const [txServerRes, supabaseRes] = await Promise.all([
-        fetch(`/api/transactions?hostId=${resolvedHostId}`),
+        freshTxs ? Promise.resolve({ ok: true, json: async () => freshTxs }) : fetch(`/api/transactions?hostId=${resolvedHostId}`),
         supabase && resolvedHostId !== 'default' 
-          ? supabase.from('transactions').select('*').eq('host_id', resolvedHostId)
+          ? supabase.from('transactions').select('*').or(`host_id.eq.${resolvedHostId},host_id.eq.${currentSlug || resolvedHostId}`)
           : Promise.resolve({ data: null })
       ]);
 
-      let merged: Transaction[] = [];
+      const pool: Transaction[] = [...transactions];
 
       if (supabaseRes.data && supabaseRes.data.length > 0) {
-        merged = supabaseRes.data.map(t => ({
-          id: t.id,
-          giftTitle: t.gift_title,
-          donorName: t.donor_name,
-          amount: t.amount,
-          method: t.method as any,
-          date: t.date,
-          status: t.status as any,
-          payment_id: t.payment_id || undefined,
-          external_reference: t.external_reference || undefined
-        }));
+        supabaseRes.data.forEach((t: any) => {
+          pool.push({
+            id: t.id,
+            giftTitle: t.gift_title,
+            donorName: t.donor_name,
+            amount: t.amount,
+            method: t.method as any,
+            date: t.date,
+            status: t.status as any,
+            payment_id: t.payment_id || undefined,
+            external_reference: t.external_reference || undefined
+          });
+        });
       }
 
       if (txServerRes.ok) {
         const serverTxs: any[] = await txServerRes.json();
-        const statusRank: Record<string, number> = {
-          checkout_started: 0, pending: 1, in_process: 2,
-          approved: 3, 'Concluído': 3, rejected: 1, cancelled: 1, refunded: 1
-        };
-        serverTxs.forEach(st => {
-          const extRef = st.external_reference || '';
-          if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return;
-          if (st.host_id && st.host_id !== resolvedHostId && !extRef.startsWith(`${resolvedHostId}:`)) {
-            return;
-          }
-
-          const matchIdx = merged.findIndex(mt =>
-            (st.payment_id && mt.payment_id === st.payment_id) ||
-            (st.external_reference && mt.external_reference === st.external_reference) ||
-            (mt.amount === st.amount && mt.donorName === st.donorName && Math.abs(new Date(mt.date).getTime() - new Date(st.date).getTime()) < 60000)
-          );
-          if (matchIdx === -1) {
-            merged.unshift(st);
-          } else {
-            const existingRank = statusRank[merged[matchIdx].status] ?? 0;
-            const incomingRank = statusRank[st.status] ?? 0;
-            if (incomingRank > existingRank) {
-              merged[matchIdx] = { ...merged[matchIdx], ...st };
-            }
-          }
-        });
+        if (Array.isArray(serverTxs)) {
+          pool.push(...serverTxs);
+        }
       }
 
-      if (merged.length > 0) {
-        setTransactions(merged);
+      if (freshTxs && Array.isArray(freshTxs)) {
+        pool.push(...freshTxs);
       }
+
+      const merged = reconcileTransactions(pool, resolvedHostId, currentSlug);
+
+      setTransactions(merged);
+      try {
+        localStorage.setItem(`wedding_tech_${resolvedHostId}_transactions`, JSON.stringify(merged));
+        if (currentSlug) {
+          localStorage.setItem(`wedding_tech_${currentSlug}_transactions`, JSON.stringify(merged));
+        }
+      } catch {}
     } catch (e) {
       console.warn("Error refreshing transactions:", e);
     }
