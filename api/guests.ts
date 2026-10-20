@@ -45,17 +45,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 1. Sync or update guest status
   if (req.method === 'POST' || req.method === 'PUT') {
-    const { action, guests: incomingGuests, guestId, name, status } = req.body || {};
+    const { action, guests: incomingGuests, guestId, name, status, confirmationCode, guest } = req.body || {};
 
     // Sync full list from host dashboard
     if (action === 'sync' || Array.isArray(incomingGuests)) {
       try {
         const { saveStoredGuests } = await import('../server_store');
         saveStoredGuests(targetUuid || hostId, incomingGuests || []);
+        if (targetSlug && targetSlug !== targetUuid) {
+          saveStoredGuests(targetSlug, incomingGuests || []);
+        }
       } catch {
         // read-only fallback
       }
       return res.status(200).json({ success: true, count: (incomingGuests || []).length });
+    }
+
+    // Host adding a guest
+    if (action === 'add' || (!guestId && name)) {
+      const newId = guestId || (guest && guest.id) || `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const guestObj = {
+        id: newId,
+        host_id: targetUuid || hostId,
+        name: (name || guest?.name || '').trim(),
+        status: status || guest?.status || 'Pendente',
+        confirmation_code: confirmationCode || guest?.confirmationCode || Math.random().toString(36).substring(2, 8).toUpperCase()
+      };
+      try {
+        const { addStoredGuest } = await import('../server_store');
+        addStoredGuest(targetUuid || hostId, guestObj);
+        if (targetSlug && targetSlug !== targetUuid) {
+          addStoredGuest(targetSlug, guestObj);
+        }
+      } catch {}
+      return res.status(200).json({ success: true, guest: guestObj });
+    }
+
+    // Host deleting a guest
+    if (action === 'delete' && guestId) {
+      try {
+        const { deleteStoredGuest } = await import('../server_store');
+        deleteStoredGuest(guestId);
+      } catch {}
+      return res.status(200).json({ success: true });
     }
 
     // Only update status of pre-registered guest (NO self-invitations!)
@@ -64,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       try {
         const { updateStoredGuestStatus } = await import('../server_store');
-        updateStoredGuestStatus(guestId, targetStatus);
+        updateStoredGuestStatus(guestId, targetStatus, name);
       } catch {
         // ignore
       }

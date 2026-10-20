@@ -149,6 +149,7 @@ CREATE POLICY "Gallery is viewable by everyone." ON gallery FOR SELECT USING (tr
 CREATE POLICY "Schedule is viewable by everyone." ON schedule FOR SELECT USING (true);
 CREATE POLICY "Public can insert messages." ON messages FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public can insert transactions." ON transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public can view guests." ON guests FOR SELECT USING (true);
 CREATE POLICY "Public can update guest status." ON guests FOR UPDATE USING (true) WITH CHECK (true);
 
 -- Authenticated Users Policies (Owner access)

@@ -409,15 +409,49 @@ export function saveStoredGuests(hostId: string, guests: StoredGuest[]): void {
 }
 
 /**
+ * Adds a single guest to the server store.
+ */
+export function addStoredGuest(hostId: string, guest: StoredGuest): void {
+  const store = ensureStoreExists();
+  if (!store.guests) store.guests = [];
+
+  const existingIdx = store.guests.findIndex(g => g.id === guest.id);
+  if (existingIdx !== -1) {
+    store.guests[existingIdx] = { ...store.guests[existingIdx], ...guest, host_id: hostId };
+  } else {
+    store.guests.push({
+      id: guest.id || Math.random().toString(36).substring(2, 9),
+      host_id: hostId,
+      name: guest.name.trim(),
+      status: guest.status || 'Pendente',
+      confirmation_code: guest.confirmation_code
+    });
+  }
+
+  saveStore(store);
+}
+
+/**
+ * Deletes a guest from the server store.
+ */
+export function deleteStoredGuest(guestId: string): void {
+  const store = ensureStoreExists();
+  if (!store.guests) return;
+  store.guests = store.guests.filter(g => g.id !== guestId);
+  saveStore(store);
+}
+
+/**
  * Updates confirmation status of a stored guest.
  */
-export function updateStoredGuestStatus(guestId: string, status: 'Pendente' | 'Confirmado' | 'Não vai'): boolean {
+export function updateStoredGuestStatus(guestId: string, status: 'Pendente' | 'Confirmado' | 'Não vai', name?: string): boolean {
   const store = ensureStoreExists();
   if (!store.guests) return false;
 
   const guest = store.guests.find(g => g.id === guestId);
   if (guest) {
     guest.status = status;
+    if (name) guest.name = name;
     saveStore(store);
     return true;
   }

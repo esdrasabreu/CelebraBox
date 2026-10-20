@@ -557,7 +557,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'add',
           hostId: resolvedHostId,
+          guestId: tempId,
           name: guest.name,
           status: guest.status || 'Confirmado',
           confirmationCode
@@ -612,6 +614,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     setGuests(prev => prev.filter(g => g.id !== id));
     if (supabase && resolvedHostId !== 'default' && id.length > 10) {
       await supabase.from('guests').delete().eq('id', id);
+    }
+    try {
+      await fetch('/api/guests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          guestId: id,
+          hostId: resolvedHostId
+        })
+      });
+    } catch {
+      // ignore
     }
   };
 

@@ -126,6 +126,17 @@ export default function AdminDashboard() {
     }
   }, [resolvedHostId]);
 
+  // Auto sync guests to backend store for public RSVP availability
+  useEffect(() => {
+    if (resolvedHostId && guests && guests.length > 0) {
+      fetch('/api/guests/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostId: resolvedHostId, guests })
+      }).catch(() => {});
+    }
+  }, [resolvedHostId, guests]);
+
   // Financial calculations
   const approvedTransactions = transactions.filter(t => t.status === 'approved' || t.status === 'Concluído');
   const totalArrecadado = approvedTransactions.reduce((acc, curr) => acc + curr.amount, 0);

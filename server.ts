@@ -16,6 +16,8 @@ import {
   cleanExpiredReservations,
   getStoredGuests,
   saveStoredGuests,
+  addStoredGuest,
+  deleteStoredGuest,
   updateStoredGuestStatus
 } from './server_store';
 
@@ -598,8 +600,11 @@ async function startServer() {
     try {
       const { hostId, guests } = req.body || {};
       if (hostId && Array.isArray(guests)) {
-        const { id } = await resolveHostIds(hostId);
+        const { id, alternate } = await resolveHostIds(hostId);
         saveStoredGuests(id, guests);
+        if (alternate && alternate !== id) {
+          saveStoredGuests(alternate, guests);
+        }
         return res.json({ success: true, count: guests.length });
       }
       res.status(400).json({ error: "Invalid payload" });
@@ -608,29 +613,67 @@ async function startServer() {
     }
   });
 
-  // Guest confirmation submission (strictly pre-registered guests only)
+  // Guest creation, RSVP update, or sync
   app.post("/api/guests", async (req, res) => {
     try {
-      const { guestId, name, status } = req.body || {};
+      const { action, hostId, guestId, name, status, confirmationCode, guest } = req.body || {};
 
-      if (!guestId) {
-        return res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
-      }
-
-      const targetStatus = status || 'Confirmado';
-      updateStoredGuestStatus(guestId, targetStatus);
-
-      if (supabase) {
-        try {
-          const payload: any = { status: targetStatus };
-          if (name) payload.name = name;
-          await supabase.from('guests').update(payload).eq('id', guestId);
-        } catch (supErr) {
-          console.warn("Supabase guest update warning:", supErr);
+      // 1. Host adding a new guest from dashboard
+      if (action === 'add' || (!guestId && name && hostId)) {
+        const { id, alternate } = await resolveHostIds(hostId);
+        const newId = guestId || (guest && guest.id) || `g_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const guestObj = {
+          id: newId,
+          host_id: id,
+          name: (name || guest?.name || '').trim(),
+          status: status || guest?.status || 'Pendente',
+          confirmation_code: confirmationCode || guest?.confirmationCode || Math.random().toString(36).substring(2, 8).toUpperCase()
+        };
+        addStoredGuest(id, guestObj);
+        if (alternate && alternate !== id) {
+          addStoredGuest(alternate, guestObj);
         }
+        return res.json({ success: true, guest: guestObj });
       }
 
-      return res.json({ success: true });
+      // 2. Host deleting a guest
+      if (action === 'delete' && guestId) {
+        deleteStoredGuest(guestId);
+        return res.json({ success: true });
+      }
+
+      // 3. RSVP confirmation submission (by guest on public page or host)
+      if (guestId) {
+        const targetStatus = status || 'Confirmado';
+        updateStoredGuestStatus(guestId, targetStatus, name);
+
+        if (supabase) {
+          try {
+            const payload: any = { status: targetStatus };
+            if (name) payload.name = name;
+            await supabase.from('guests').update(payload).eq('id', guestId);
+          } catch (supErr) {
+            console.warn("Supabase guest update warning:", supErr);
+          }
+        }
+
+        return res.json({ success: true });
+      }
+
+      return res.status(400).json({ error: "Apenas convidados já cadastrados na lista podem confirmar presença." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/guests", (req, res) => {
+    try {
+      const guestId = (req.query.id || req.body?.id) as string;
+      if (guestId) {
+        deleteStoredGuest(guestId);
+        return res.json({ success: true });
+      }
+      res.status(400).json({ error: "Missing guestId" });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
