@@ -62,16 +62,18 @@ export function reconcileTransactions(
   const valid = txs.filter(t => {
     const extRef = (t.external_reference || '').trim();
     if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
+
+    // STRICT: Must be a wedding gift from the event! Personal transfers have no gift_id and no event reference
+    const hasGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+    if (!hasGift && t.id !== 'tx1' && t.id !== 'tx2') return false;
     
     if (targetHostId !== 'default') {
       if (t.id === 'tx1' || t.id === 'tx2') return false;
       
+      // STRICT ACCOUNT ISOLATION: Must belong to targetHostId (UUID) or targetSlug
       const belongs = (
-        !t.host_id ||
-        t.host_id === targetHostId ||
-        (targetSlug && t.host_id === targetSlug) ||
-        extRef.startsWith(`${targetHostId}:`) ||
-        (targetSlug && extRef.startsWith(`${targetSlug}:`))
+        (Boolean(t.host_id) && (t.host_id === targetHostId || (Boolean(targetSlug) && t.host_id === targetSlug))) ||
+        (Boolean(extRef) && (extRef.startsWith(`${targetHostId}:`) || (Boolean(targetSlug) && extRef.startsWith(`${targetSlug}:`))))
       );
       if (!belongs) return false;
     }

@@ -44,19 +44,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 1. Try reading from Supabase
   if (supabase && hostId && hostId !== 'default') {
     try {
-      const { data } = await supabase
-        .from('transactions')
-        .select('*')
-        .or(`host_id.eq.${targetUuid},host_id.eq.${targetSlug}`);
+      const isTargetUuidValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUuid);
+      if (isTargetUuidValid) {
+        const { data } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('host_id', targetUuid);
 
-      if (data && data.length > 0) {
-        transactions = data
-          .filter(t => {
-            // Discard any personal / Mercado Livre purchases
-            const extRef = t.external_reference || '';
-            if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return false;
-            return true;
-          })
+        if (data && data.length > 0) {
+          transactions = data
+            .filter(t => {
+              const extRef = (t.external_reference || '').trim();
+              if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
+              // STRICT: Must be a wedding gift transaction with gift_id or gift ref
+              const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+              if (!isGift) return false;
+              return true;
+            })
           .map(t => ({
             id: t.id,
             host_id: t.host_id,
@@ -70,6 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             payment_id: t.payment_id,
             external_reference: t.external_reference
           }));
+        }
       }
     } catch (e) {
       console.warn("Could not fetch transactions from Supabase:", e);
@@ -83,8 +88,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     localTxs.forEach(lt => {
       if (!lt.host_id || lt.host_id.trim() === '') return;
       if (lt.host_id !== targetUuid && lt.host_id !== targetSlug) return;
-      const extRef = lt.external_reference || '';
+      const extRef = (lt.external_reference || '').trim();
       if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return;
+      const isGift = Boolean(lt.gift_id && lt.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+      if (!isGift) return;
 
       const matchIdx = transactions.findIndex(t => 
         (lt.payment_id && t.payment_id === lt.payment_id) || 

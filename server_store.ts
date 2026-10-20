@@ -301,8 +301,13 @@ export function getStoredTransactions(hostId: string, alternateId?: string): Sto
   const store = ensureStoreExists();
   const matched = store.transactions.filter(t => {
     if (!t.host_id || t.host_id.trim() === '') return false;
-    const extRef = t.external_reference || '';
-    if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081')) return false;
+    const extRef = (t.external_reference || '').trim();
+    if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
+
+    // STRICT: Must be a wedding gift transaction
+    const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+    if (!isGift) return false;
+
     if (hostId === 'all') return true;
     return (
       t.host_id === hostId ||

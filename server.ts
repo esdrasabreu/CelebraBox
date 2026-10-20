@@ -265,49 +265,59 @@ async function startServer() {
       // 3. Insert or update transaction in Supabase with all tracking fields
       if (supabase && hostId) {
         try {
-          // Check if already recorded (by payment_id OR external_reference)
-          let existingTx: any = null;
-          if (paymentId) {
-            const { data } = await supabase
-              .from('transactions')
-              .select('id, status')
-              .eq('payment_id', paymentId)
-              .maybeSingle();
-            existingTx = data;
-          }
-          if (!existingTx && externalReference) {
-            const { data } = await supabase
-              .from('transactions')
-              .select('id, status')
-              .eq('external_reference', externalReference)
-              .maybeSingle();
-            existingTx = data;
-          }
+          const { id: rId, alternate } = await resolveHostIds(hostId);
+          const isUuid = (val?: string) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+          const effectiveUuid = isUuid(rId) ? rId : (isUuid(alternate) ? alternate : null);
 
-          if (!existingTx) {
-            await supabase.from('transactions').insert([{
-              host_id: hostId,
-              gift_title: giftTitle,
-              gift_id: giftId || null,
-              donor_name: donorName,
-              amount: amount,
-              method: methodFriendly,
-              status: 'approved',
-              payment_id: paymentId,
-              external_reference: externalReference || null
-            }]);
-          } else {
-            // Upgrade existing record to approved
-            await supabase.from('transactions')
-              .update({
-                status: 'approved',
-                method: methodFriendly,
-                amount: amount,
-                payment_id: paymentId,
+          if (effectiveUuid) {
+            // Check if already recorded (by payment_id OR external_reference)
+            let existingTx: any = null;
+            if (paymentId) {
+              const { data } = await supabase
+                .from('transactions')
+                .select('id, status')
+                .eq('payment_id', paymentId)
+                .maybeSingle();
+              existingTx = data;
+            }
+            if (!existingTx && externalReference) {
+              const { data } = await supabase
+                .from('transactions')
+                .select('id, status')
+                .eq('external_reference', externalReference)
+                .maybeSingle();
+              existingTx = data;
+            }
+
+            const txDate = paymentInfo.date_approved || paymentInfo.date_created || new Date().toISOString();
+
+            if (!existingTx) {
+              await supabase.from('transactions').insert([{
+                host_id: effectiveUuid,
+                gift_title: giftTitle,
+                gift_id: giftId || null,
                 donor_name: donorName,
-                gift_title: giftTitle
-              })
-              .eq('id', existingTx.id);
+                amount: amount,
+                method: methodFriendly,
+                status: 'approved',
+                payment_id: paymentId,
+                external_reference: externalReference || null,
+                date: txDate
+              }]);
+            } else {
+              // Upgrade existing record to approved
+              await supabase.from('transactions')
+                .update({
+                  status: 'approved',
+                  method: methodFriendly,
+                  amount: amount,
+                  payment_id: paymentId,
+                  donor_name: donorName,
+                  gift_title: giftTitle,
+                  date: txDate
+                })
+                .eq('id', existingTx.id);
+            }
           }
         } catch (supabaseTxErr) {
           console.warn("Could not insert/update transaction in Supabase (will rely on server store):", supabaseTxErr);

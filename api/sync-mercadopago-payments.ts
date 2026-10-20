@@ -85,9 +85,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Resolve target host UUID and Slug for strict account isolation
     let targetUuid = hostId;
     let targetSlug = hostId;
+    const isHostUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
     if (supabase && hostId && hostId !== 'default') {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(hostId);
-      if (!isUuid) {
+      if (!isHostUuid) {
         targetSlug = hostId;
         try {
           const { data: eventData } = await supabase.from('event_details').select('host_id').eq('slug', hostId).maybeSingle();
@@ -132,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!giftId || !itemHostId) {
           continue; // Discard: not a wedding gift!
         }
-        if (externalReference.startsWith('20000') || externalReference.startsWith('POTS') || externalReference.startsWith('11081')) {
+        if (externalReference.startsWith('20000') || externalReference.startsWith('POTS') || externalReference.startsWith('11081') || externalReference.startsWith('ML')) {
           continue; // Discard Mercado Livre and Cofrinho transfers
         }
 
@@ -150,10 +150,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           continue; // Discard: belongs to another event/host!
         }
 
-        const effectiveHostId = targetUuid || targetSlug || hostId;
+        const isTargetUuidValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUuid);
+        const effectiveHostId = isTargetUuidValid ? targetUuid : (isHostUuid ? hostId : '');
 
         // 1. Sync to Supabase
-        if (supabase) {
+        if (supabase && effectiveHostId) {
           try {
             // Check if already recorded by payment_id OR external_reference
             let existingTx: any = null;
@@ -233,7 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { confirmPayment } = await import('../server_store');
           confirmPayment({
             paymentId,
-            hostId: effectiveHostId,
+            hostId: targetSlug || effectiveHostId || hostId,
             giftId,
             externalReference,
             amount,
@@ -250,18 +251,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Retrieve transactions for response
     let transactions: any[] = [];
-    if (supabase && hostId && hostId !== 'default') {
+    const isTargetUuidValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUuid);
+    if (supabase && isTargetUuidValid && hostId !== 'default') {
       try {
         const { data: txList } = await supabase
           .from('transactions')
           .select('*')
-          .or(`host_id.eq.${targetUuid},host_id.eq.${targetSlug}`);
+          .eq('host_id', targetUuid);
 
         if (txList && txList.length > 0) {
           transactions = txList
             .filter(t => {
-              const ext = t.external_reference || '';
-              return !ext.startsWith('20000') && !ext.startsWith('POTS') && !ext.startsWith('11081');
+              const ext = (t.external_reference || '').trim();
+              if (ext.startsWith('20000') || ext.startsWith('POTS') || ext.startsWith('11081') || ext.startsWith('ML')) return false;
+              const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (ext.includes(':') && ext.split(':').length >= 2);
+              if (!isGift) return false;
+              return true;
             })
             .map(t => ({
               id: t.id,
@@ -287,6 +292,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { getStoredTransactions } = await import('../server_store');
       const localTxs = getStoredTransactions(targetUuid, targetSlug);
       localTxs.forEach(lt => {
+        const ext = (lt.external_reference || '').trim();
+        if (ext.startsWith('20000') || ext.startsWith('POTS') || ext.startsWith('11081') || ext.startsWith('ML')) return;
+        const isGift = Boolean(lt.gift_id && lt.gift_id.trim() !== '') || (ext.includes(':') && ext.split(':').length >= 2);
+        if (!isGift) return;
+
         const exists = transactions.some(t =>
           (lt.payment_id && t.payment_id === lt.payment_id) ||
           (lt.external_reference && t.external_reference === lt.external_reference)
