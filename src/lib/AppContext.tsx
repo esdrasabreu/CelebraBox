@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { EventDetails, Gift, Guest, Message, Transaction, PaymentSettings, GalleryImage, ScheduleItem, ExpenseItem } from '../types';
 import { initialEventDetails, initialGifts, initialGuests, initialMessages, initialTransactions, initialPaymentSettings, initialGallery, initialSchedule, initialExpenses } from './data';
 import { supabase } from './supabase';
+import { cleanStoryText } from './textUtils';
 
 type AppContextType = {
   eventDetails: EventDetails;
@@ -162,7 +163,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     }
   };
 
-  const [eventDetails, setEventDetailsState] = useState<EventDetails>(() => loadState('event', initialEventDetails));
+  const [eventDetails, setEventDetailsState] = useState<EventDetails>(() => {
+    const loaded = loadState<EventDetails>('event', initialEventDetails);
+    return { ...loaded, story: cleanStoryText(loaded.story || '') };
+  });
   const [gifts, setGifts] = useState<Gift[]>(() => loadState('gifts', initialGifts));
   const [messages, setMessages] = useState<Message[]>(() => loadState('messages', initialMessages));
   const [guests, setGuests] = useState<Guest[]>(() => loadState('guests', initialGuests));
@@ -234,7 +238,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
               state: eventData.location_state || '',
               mapsLink: eventData.location_maps_link || ''
             },
-            story: eventData.story || '',
+            story: cleanStoryText(eventData.story || ''),
             coverImage: eventData.cover_image || '',
             coverMediaType: eventData.cover_media_type || 'image',
             coverVideoUrl: eventData.cover_video_url || '',
@@ -424,24 +428,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   useEffect(() => localStorage.setItem(`wedding_tech_${hostId}_expenses`, JSON.stringify(expenses)), [hostId, expenses]);
 
   const setEventDetails = async (details: EventDetails) => {
-    setEventDetailsState(details);
+    const sanitizedDetails: EventDetails = {
+      ...details,
+      story: cleanStoryText(details.story || '')
+    };
+    setEventDetailsState(sanitizedDetails);
     if (supabase && resolvedHostId !== 'default') {
       const { error } = await supabase.from('event_details').upsert({
         host_id: resolvedHostId,
-        event_type: details.eventType,
-        title: details.title,
-        date: details.date,
-        location_name: details.location.name,
-        location_address: details.location.address,
-        location_city: details.location.city,
-        location_state: details.location.state,
-        location_maps_link: details.location.mapsLink,
-        story: details.story,
-        cover_image: details.coverImage,
-        cover_media_type: details.coverMediaType || 'image',
-        cover_video_url: details.coverVideoUrl || '',
-        theme_color: details.themeColor,
-        slug: details.slug || null // use null instead of empty string for UNIQUE constraint
+        event_type: sanitizedDetails.eventType,
+        title: sanitizedDetails.title,
+        date: sanitizedDetails.date,
+        location_name: sanitizedDetails.location.name,
+        location_address: sanitizedDetails.location.address,
+        location_city: sanitizedDetails.location.city,
+        location_state: sanitizedDetails.location.state,
+        location_maps_link: sanitizedDetails.location.mapsLink,
+        story: sanitizedDetails.story,
+        cover_image: sanitizedDetails.coverImage,
+        cover_media_type: sanitizedDetails.coverMediaType || 'image',
+        cover_video_url: sanitizedDetails.coverVideoUrl || '',
+        theme_color: sanitizedDetails.themeColor,
+        slug: sanitizedDetails.slug || null // use null instead of empty string for UNIQUE constraint
       });
       if (error) {
         console.error("Upsert event_details error:", error);

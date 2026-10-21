@@ -7,6 +7,7 @@ import { Gift as GiftType, Guest, GalleryImage, ScheduleItem, ExpenseItem } from
 import FileUpload from '../components/FileUpload';
 import { uploadFile } from '../lib/storage';
 import { supabase } from '../lib/supabase';
+import { cleanStoryText } from '../lib/textUtils';
 
 export default function AdminDashboard() {
   const { host, logout } = useAuth();
@@ -184,7 +185,7 @@ export default function AdminDashboard() {
     slug: eventDetails.slug || '',
     coverMediaType: eventDetails.coverMediaType || 'image',
     coverVideoUrl: eventDetails.coverVideoUrl || '',
-    story: eventDetails.story,
+    story: cleanStoryText(eventDetails.story),
     coverImage: eventDetails.coverImage,
   });
 
@@ -212,9 +213,9 @@ export default function AdminDashboard() {
       locationState: eventDetails.location.state,
       locationMapsLink: eventDetails.location.mapsLink,
       slug: eventDetails.slug || '',
-    coverMediaType: eventDetails.coverMediaType || 'image',
-    coverVideoUrl: eventDetails.coverVideoUrl || '',
-      story: eventDetails.story,
+      coverMediaType: eventDetails.coverMediaType || 'image',
+      coverVideoUrl: eventDetails.coverVideoUrl || '',
+      story: cleanStoryText(eventDetails.story),
       coverImage: eventDetails.coverImage,
     });
   }, [eventDetails]);
@@ -399,7 +400,7 @@ export default function AdminDashboard() {
         state: settingsForm.locationState,
         mapsLink: settingsForm.locationMapsLink,
       },
-      story: settingsForm.story,
+      story: cleanStoryText(settingsForm.story),
       coverImage: settingsForm.coverImage,
     };
     try { 
@@ -1636,9 +1637,13 @@ export default function AdminDashboard() {
                         rows={6}
                         value={settingsForm.story}
                         onChange={e => setSettingsForm({...settingsForm, story: e.target.value})}
+                        onBlur={e => setSettingsForm({...settingsForm, story: cleanStoryText(e.target.value)})}
                         className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#ef007e] focus:outline-none resize-y" 
                         placeholder="Conte um pouco da sua história..."
                       />
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Acentos e cedilhas são ajustados e formatados automaticamente para exibição perfeita.
+                      </p>
                     </div>
                   </div>
                 )}

@@ -30,6 +30,7 @@ import { useAppContext } from '../lib/AppContext';
 import CountdownTimer from '../components/CountdownTimer';
 import PaymentModal from '../components/PaymentModal';
 import { Gift, Guest } from '../types';
+import { cleanStoryText } from '../lib/textUtils';
 
 export default function PublicPage() {
   const { eventDetails, gifts, messages, addMessage, guests, addGuest, updateGuest, gallery, isLoading, isNotFound, reservations } = useAppContext();
@@ -255,7 +256,8 @@ export default function PublicPage() {
         el.setAttribute('content', content);
       };
       
-      const desc = eventDetails.story ? eventDetails.story.substring(0, 150) + '...' : 'Venha celebrar conosco!';
+      const cleanDesc = cleanStoryText(eventDetails.story);
+      const desc = cleanDesc ? cleanDesc.substring(0, 150) + '...' : 'Venha celebrar conosco!';
       
       setMeta('description', desc);
       setMeta('og:title', eventDetails.title, true);
@@ -505,7 +507,7 @@ export default function PublicPage() {
           </h2>
           <div className="h-1 w-16 bg-[#ef007e] mx-auto mb-8 rounded-full" />
           <p className="text-lg md:text-xl text-slate-600 leading-relaxed mb-12 font-light">
-            {eventDetails.story || 'Sejam muito bem-vindos ao nosso evento! Preparamos tudo com muito amor para compartilharmos momentos inesquecíveis juntos.'}
+            {cleanStoryText(eventDetails.story) || 'Sejam muito bem-vindos ao nosso evento! Preparamos tudo com muito amor para compartilharmos momentos inesquecíveis juntos.'}
           </p>
         </div>
       </motion.section>
