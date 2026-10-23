@@ -8,6 +8,7 @@ import FileUpload from '../components/FileUpload';
 import { uploadFile } from '../lib/storage';
 import { supabase } from '../lib/supabase';
 import { cleanStoryText } from '../lib/textUtils';
+import { optimizeRemoteImage } from '../lib/imageOptimizer';
 
 export default function AdminDashboard() {
   const { host, logout } = useAuth();
@@ -156,6 +157,8 @@ export default function AdminDashboard() {
   // GALLERY STATE
   const [galleryForm, setGalleryForm] = useState({ id: '', url: '', storagePath: '', caption: '', order: 0 });
   const [isEditingGallery, setIsEditingGallery] = useState(false);
+  const [isOptimizingGallery, setIsOptimizingGallery] = useState(false);
+  const [optimizationProgress, setOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
 
   // SCHEDULE STATE
   const [scheduleForm, setScheduleForm] = useState({ id: '', time: '', title: '', description: '' });
@@ -340,6 +343,74 @@ export default function AdminDashboard() {
     }
     
     if (e.target) e.target.value = '';
+  };
+
+  const handleBatchOptimizeGallery = async () => {
+    if (gallery.length === 0) {
+      toast.info('Não há fotos na galeria para otimizar.');
+      return;
+    }
+
+    setIsOptimizingGallery(true);
+    setOptimizationProgress({ current: 0, total: gallery.length });
+    let optimizedCount = 0;
+    let savedKBTotal = 0;
+
+    try {
+      for (let i = 0; i < gallery.length; i++) {
+        const item = gallery[i];
+        setOptimizationProgress({ current: i + 1, total: gallery.length });
+
+        if (!item.url || !item.url.includes('supabase.co')) {
+          continue;
+        }
+
+        try {
+          let path = item.storagePath;
+          if (!path) {
+            const match = item.url.match(/event_assets\/(.+?)(\?.*)?$/);
+            if (match) {
+              path = decodeURIComponent(match[1]);
+            }
+          }
+
+          if (!path) continue;
+
+          const result = await optimizeRemoteImage(item.url);
+          if (result && (result.originalSize - result.newSize) > 50 * 1024) {
+            const { error: uploadErr } = await supabase.storage
+              .from('event_assets')
+              .upload(path, result.blob, {
+                contentType: 'image/jpeg',
+                cacheControl: '31536000',
+                upsert: true
+              });
+
+            if (!uploadErr) {
+              optimizedCount++;
+              savedKBTotal += Math.round((result.originalSize - result.newSize) / 1024);
+            } else {
+              console.warn(`Erro ao re-enviar imagem otimizada ${path}:`, uploadErr);
+            }
+          }
+        } catch (err) {
+          console.error(`Erro ao otimizar foto ${item.id}:`, err);
+        }
+      }
+
+      if (optimizedCount > 0) {
+        const savedMB = (savedKBTotal / 1024).toFixed(1);
+        toast.success(`Pronto! ${optimizedCount} fotos foram otimizadas. Economia de ~${savedMB} MB de transferência por visitante!`);
+      } else {
+        toast.info('Todas as fotos já estão otimizadas com tamanho reduzido!');
+      }
+    } catch (err: any) {
+      console.error('Erro na otimização da galeria:', err);
+      toast.error('Ocorreu um erro ao otimizar algumas fotos.');
+    } finally {
+      setIsOptimizingGallery(false);
+      setOptimizationProgress(null);
+    }
   };
 
   const handleScheduleSubmit = (e: React.FormEvent) => {
@@ -708,10 +779,44 @@ export default function AdminDashboard() {
         {/* GALLERY TAB */}
         {activeTab === 'gallery' && (
           <div className="space-y-6 max-w-5xl mx-auto">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-800">Galeria de Fotos</h2>
-              <p className="text-slate-500 text-sm">Gerencie as fotos exibidas na página pública do evento.</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-800">Galeria de Fotos</h2>
+                <p className="text-slate-500 text-sm">Gerencie as fotos exibidas na página pública do evento.</p>
+              </div>
+
+              {/* Supabase Egress Protection & Batch Optimize Action */}
+              <button
+                type="button"
+                onClick={handleBatchOptimizeGallery}
+                disabled={isOptimizingGallery || gallery.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white rounded-xl font-semibold text-sm transition-all shadow-xs border border-emerald-200 cursor-pointer disabled:opacity-50"
+                title="Reduz o peso das fotos de até 15MB para ~250KB, economizando a cota de tráfego do Supabase"
+              >
+                <Sparkles className={`w-4 h-4 ${isOptimizingGallery ? 'animate-spin' : ''}`} />
+                <span>
+                  {isOptimizingGallery
+                    ? `Otimizando fotos (${optimizationProgress?.current || 0}/${optimizationProgress?.total || gallery.length})...`
+                    : 'Otimizar Peso das Fotos (Anti-Egress)'}
+                </span>
+              </button>
             </div>
+
+            {/* Quota optimization info banner */}
+            <div className="bg-emerald-50/70 border border-emerald-200/80 rounded-2xl p-4 flex items-start gap-3.5 shadow-2xs">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+              <div className="text-xs text-emerald-950 space-y-1">
+                <p className="font-semibold text-sm text-emerald-900">
+                  Proteção Automática de Limite de Tráfego (Supabase)
+                </p>
+                <p className="text-emerald-800/90 leading-relaxed">
+                  Fotos tiradas por celulares chegam a pesar 10MB a 15MB cada. Com mais de 30 fotos na página, cada visitante consumia mais de 150MB de dados!
+                  Novos uploads já são otimizados automaticamente para ~250KB com cache de 1 ano. 
+                  Clique em <strong>"Otimizar Peso das Fotos"</strong> para reprocessar fotos antigas e garantir que o consumo de tráfego fique bem abaixo do limite de 5.5 GB.
+                </p>
+              </div>
+            </div>
+
             <form onSubmit={handleGallerySubmit} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-end">
               <div className="flex-1 w-full">
                 <label className="block text-xs font-medium text-slate-500 mb-1">Upload de Fotos</label>

@@ -619,6 +619,8 @@ export default function PublicPage() {
                         src={img.url} 
                         alt={img.caption || `Miniatura ${idx + 1}`} 
                         className="w-full h-full object-contain p-1"
+                        loading="lazy"
+                        decoding="async"
                       />
                       {isCurrent && (
                         <div className="absolute bottom-1 right-1 w-2.5 h-2.5 rounded-full bg-[#ef007e] ring-2 ring-white" />
@@ -691,7 +693,7 @@ export default function PublicPage() {
                     idx === activePhotoIndex ? 'border-[#ef007e] scale-105' : 'border-transparent opacity-50 hover:opacity-80'
                   }`}
                 >
-                  <img src={img.url} alt="" className="w-full h-full object-contain bg-slate-900" />
+                  <img src={img.url} alt="" className="w-full h-full object-contain bg-slate-900" loading="lazy" decoding="async" />
                 </button>
               ))}
             </div>
@@ -1063,6 +1065,8 @@ export default function PublicPage() {
                           src={gift.imageUrl} 
                           alt={gift.title} 
                           className="w-full h-full object-cover transition-transform duration-500 hover:scale-105" 
+                          loading="lazy"
+                          decoding="async"
                         />
                         {isReserved && (
                           <div className="absolute top-3 right-3 bg-amber-500/95 text-white text-xs font-semibold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1 backdrop-blur-xs">
