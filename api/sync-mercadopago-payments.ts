@@ -191,7 +191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
 
             if (!existingTx) {
-              await supabase.from('transactions').insert([{
+              const { error: insErr } = await supabase.from('transactions').insert([{
                 host_id: effectiveHostId,
                 gift_title: giftTitle,
                 gift_id: giftId || null,
@@ -203,10 +203,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 external_reference: externalReference || null,
                 date: p.date_approved || p.date_created || new Date().toISOString()
               }]);
+              if (insErr) {
+                await supabase.from('transactions').insert([{
+                  host_id: effectiveHostId,
+                  gift_title: giftTitle,
+                  donor_name: donorName,
+                  amount: amount,
+                  method: methodFriendly,
+                  status: 'approved',
+                  date: p.date_approved || p.date_created || new Date().toISOString()
+                }]);
+              }
               importedCount++;
             } else {
               // Upgrade the existing pending record to approved!
-              await supabase.from('transactions')
+              const { error: updErr } = await supabase.from('transactions')
                 .update({
                   status: 'approved',
                   method: methodFriendly,
@@ -217,6 +228,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   date: p.date_approved || p.date_created || new Date().toISOString()
                 })
                 .eq('id', existingTx.id);
+              if (updErr) {
+                await supabase.from('transactions')
+                  .update({
+                    status: 'approved',
+                    method: methodFriendly,
+                    amount: amount,
+                    donor_name: donorName,
+                    gift_title: giftTitle,
+                    date: p.date_approved || p.date_created || new Date().toISOString()
+                  })
+                  .eq('id', existingTx.id);
+              }
               importedCount++;
             }
 
@@ -282,7 +305,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .filter(t => {
               const ext = (t.external_reference || '').trim();
               if (ext.startsWith('20000') || ext.startsWith('POTS') || ext.startsWith('11081') || ext.startsWith('ML')) return false;
-              const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (ext.includes(':') && ext.split(':').length >= 2);
+              const isGift =
+                Boolean(t.gift_id && String(t.gift_id).trim() !== '') ||
+                (ext.includes(':') && ext.split(':').length >= 2) ||
+                t.method === 'Pix Direto';
               if (!isGift) return false;
               return true;
             })
@@ -312,7 +338,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       localTxs.forEach(lt => {
         const ext = (lt.external_reference || '').trim();
         if (ext.startsWith('20000') || ext.startsWith('POTS') || ext.startsWith('11081') || ext.startsWith('ML')) return;
-        const isGift = Boolean(lt.gift_id && lt.gift_id.trim() !== '') || (ext.includes(':') && ext.split(':').length >= 2);
+        const isGift =
+          Boolean(lt.gift_id && lt.gift_id.trim() !== '') ||
+          (ext.includes(':') && ext.split(':').length >= 2) ||
+          lt.method === 'Pix Direto';
         if (!isGift) return;
 
         const exists = transactions.some(t =>

@@ -7,6 +7,11 @@ ALTER TABLE payment_settings
   ADD COLUMN IF NOT EXISTS card_fee_percent NUMERIC DEFAULT 4.98,
   ADD COLUMN IF NOT EXISTS enable_manual_pix BOOLEAN DEFAULT FALSE;
 
+ALTER TABLE transactions
+  ADD COLUMN IF NOT EXISTS gift_id TEXT,
+  ADD COLUMN IF NOT EXISTS payment_id TEXT,
+  ADD COLUMN IF NOT EXISTS external_reference TEXT;
+
 -- RPC segura para visitantes públicos lerem apenas configurações não-sensíveis (sem expor gateway_access_token)
 CREATE OR REPLACE FUNCTION get_public_payment_config(host_id_param UUID)
 RETURNS JSON

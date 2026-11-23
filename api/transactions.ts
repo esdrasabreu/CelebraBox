@@ -56,8 +56,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .filter(t => {
               const extRef = (t.external_reference || '').trim();
               if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
-              // STRICT: Must be a wedding gift transaction with gift_id or gift ref
-              const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+              const isGift =
+                Boolean(t.gift_id && String(t.gift_id).trim() !== '') ||
+                (extRef.includes(':') && extRef.split(':').length >= 2) ||
+                t.method === 'Pix Direto';
               if (!isGift) return false;
               return true;
             })
@@ -90,12 +92,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (lt.host_id !== targetUuid && lt.host_id !== targetSlug) return;
       const extRef = (lt.external_reference || '').trim();
       if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return;
-      const isGift = Boolean(lt.gift_id && lt.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+      const isGift =
+        Boolean(lt.gift_id && lt.gift_id.trim() !== '') ||
+        (extRef.includes(':') && extRef.split(':').length >= 2) ||
+        lt.method === 'Pix Direto';
       if (!isGift) return;
 
       const matchIdx = transactions.findIndex(t => 
         (lt.payment_id && t.payment_id === lt.payment_id) || 
-        (lt.external_reference && t.external_reference === lt.external_reference)
+        (lt.external_reference && t.external_reference === lt.external_reference) ||
+        (lt.method === 'Pix Direto' &&
+          t.method === 'Pix Direto' &&
+          (t.donorName || '').trim().toLowerCase() === (lt.donorName || '').trim().toLowerCase() &&
+          (t.giftTitle || '').trim().toLowerCase() === (lt.giftTitle || '').trim().toLowerCase() &&
+          Math.abs(Number(t.amount) - Number(lt.amount)) < 0.05)
       );
       if (matchIdx === -1) {
         transactions.unshift(lt);

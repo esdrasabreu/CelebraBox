@@ -136,6 +136,37 @@ async function startServer() {
     return defaultConfig;
   }
 
+  // Helper to get Supabase client scoped to caller's Authorization JWT (needed for RLS updates)
+  function getAuthenticatedSupabase(req: express.Request) {
+    if (!supabaseUrl || !supabaseKey) return null;
+    const authHeader = req.headers.authorization;
+    const jwt = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : '';
+    if (!jwt) return supabase;
+    return createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: `Bearer ${jwt}` } }
+    });
+  }
+
+  const isUuid = (v?: string) => Boolean(v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+
+  async function insertTransactionResilient(client: any, row: Record<string, any>) {
+    if (!client) return { data: null, error: null };
+    const res1 = await client.from('transactions').insert([row]).select().maybeSingle();
+    if (!res1.error) return res1;
+
+    // Fallback when optional tracking columns (gift_id, external_reference, payment_id) do not exist in user's Supabase schema
+    const baseRow = {
+      host_id: row.host_id,
+      gift_title: row.gift_title,
+      donor_name: row.donor_name,
+      amount: row.amount,
+      method: row.method,
+      status: row.status,
+      date: row.date
+    };
+    return await client.from('transactions').insert([baseRow]).select().maybeSingle();
+  }
+
   // Helper to verify authenticated host user via Supabase JWT
   async function verifyHostAuth(req: express.Request, hostId: string): Promise<boolean> {
     if (!supabase || hostId === 'default') return true;
@@ -457,10 +488,9 @@ async function startServer() {
       if (supabase && hostId && hostId !== 'default') {
         try {
           const { id: rId, alternate } = await resolveHostIds(hostId);
-          const isUuid = (val?: string) => Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
           const effectiveUuid = isUuid(rId) ? rId : (isUuid(alternate) ? alternate : null);
           if (effectiveUuid) {
-            await supabase.from('transactions').insert([{
+            const { data: insertedRow, error: insErr } = await insertTransactionResilient(supabase, {
               host_id: effectiveUuid,
               gift_title: authoritativeTitle,
               gift_id: giftId || null,
@@ -470,7 +500,12 @@ async function startServer() {
               status: 'pending',
               external_reference: extRef,
               date: new Date().toISOString()
-            }]);
+            });
+            if (insErr) {
+              console.warn("Supabase manual pix insert warning:", insErr.message);
+            } else if (insertedRow?.id) {
+              tx.id = insertedRow.id;
+            }
           }
         } catch (supErr) {
           console.warn("Could not record manual pix in Supabase:", supErr);
@@ -486,8 +521,19 @@ async function startServer() {
   // 1c. Host approval endpoint for Manual Pix
   app.post("/api/transactions/approve-manual", async (req, res) => {
     try {
-      const { hostId, transactionId, externalReference } = req.body || {};
-      if (!hostId || (!transactionId && !externalReference)) {
+      const {
+        hostId,
+        transactionId,
+        externalReference,
+        giftId,
+        giftTitle,
+        donorName,
+        amount,
+        method,
+        date
+      } = req.body || {};
+
+      if (!hostId || (!transactionId && !externalReference && !(donorName && giftTitle))) {
         return res.status(400).json({ error: "Missing hostId or transaction identifier" });
       }
 
@@ -496,25 +542,83 @@ async function startServer() {
         return res.status(401).json({ error: "Unauthorized" });
       }
 
-      const approvedTx = approveManualTransactionInStore(externalReference || transactionId);
+      const { id: resolvedId, alternate } = await resolveHostIds(hostId);
+      const effectiveUuid = isUuid(resolvedId) ? resolvedId : (isUuid(alternate) ? alternate : resolvedId);
 
-      if (supabase && hostId !== 'default') {
+      const approvedTx = approveManualTransactionInStore({
+        transactionId,
+        externalReference,
+        hostId: effectiveUuid,
+        alternateHostId: alternate || hostId,
+        giftId,
+        giftTitle,
+        donorName,
+        amount: amount !== undefined ? Number(amount) : undefined,
+        method: method || 'Pix Direto',
+        date
+      });
+
+      let updatedInDb = false;
+      const authSupabase = getAuthenticatedSupabase(req);
+
+      if (authSupabase && hostId !== 'default') {
         try {
           if (externalReference) {
-            await supabase.from('transactions').update({ status: 'approved' }).eq('external_reference', externalReference);
-          } else if (transactionId && transactionId.length > 10) {
-            await supabase.from('transactions').update({ status: 'approved' }).eq('id', transactionId);
+            const { data: extData, error: extErr } = await authSupabase
+              .from('transactions')
+              .update({ status: 'approved' })
+              .eq('external_reference', externalReference)
+              .select();
+            if (!extErr && extData && extData.length > 0) {
+              updatedInDb = true;
+            }
           }
 
-          const giftId = approvedTx?.gift_id;
-          if (giftId) {
-            const { data: currentGift } = await supabase
+          if (!updatedInDb && transactionId && isUuid(transactionId)) {
+            const { data: idData, error: idErr } = await authSupabase
+              .from('transactions')
+              .update({ status: 'approved' })
+              .eq('id', transactionId)
+              .select();
+            if (!idErr && idData && idData.length > 0) {
+              updatedInDb = true;
+            }
+          }
+
+          if (!updatedInDb && isUuid(effectiveUuid) && donorName && giftTitle) {
+            const { data: matchRows } = await authSupabase
+              .from('transactions')
+              .select('id, status, amount, method')
+              .eq('host_id', effectiveUuid)
+              .eq('donor_name', String(donorName).trim())
+              .eq('gift_title', String(giftTitle).trim())
+              .in('status', ['pending', 'Pendente']);
+
+            if (matchRows && matchRows.length > 0) {
+              const targetRow = matchRows[0];
+              const { data: updData, error: updErr } = await authSupabase
+                .from('transactions')
+                .update({ status: 'approved' })
+                .eq('id', targetRow.id)
+                .select();
+              if (!updErr && updData && updData.length > 0) {
+                updatedInDb = true;
+              }
+            }
+          }
+
+          const effectiveGiftId = approvedTx?.gift_id || giftId;
+          if (effectiveGiftId && isUuid(effectiveGiftId)) {
+            const { data: currentGift } = await authSupabase
               .from('gifts')
               .select('id, quantity')
-              .eq('id', giftId)
+              .eq('id', effectiveGiftId)
               .maybeSingle();
-            if (currentGift && currentGift.quantity !== undefined && currentGift.quantity > 0) {
-              await supabase.from('gifts').update({ quantity: Math.max(0, currentGift.quantity - 1) }).eq('id', giftId);
+            if (currentGift && currentGift.quantity !== undefined && currentGift.quantity !== null && currentGift.quantity > 0) {
+              await authSupabase
+                .from('gifts')
+                .update({ quantity: Math.max(0, currentGift.quantity - 1) })
+                .eq('id', effectiveGiftId);
             }
           }
         } catch (supErr) {
@@ -522,7 +626,11 @@ async function startServer() {
         }
       }
 
-      res.json({ success: true, transaction: approvedTx });
+      if (!approvedTx && !updatedInDb) {
+        return res.status(404).json({ success: false, error: "Transação não encontrada para confirmação." });
+      }
+
+      res.json({ success: true, transaction: approvedTx, updatedInDb });
     } catch (e: any) {
       res.status(500).json({ error: "Failed to approve manual transaction" });
     }
@@ -661,7 +769,7 @@ async function startServer() {
             const txDate = paymentInfo.date_approved || paymentInfo.date_created || new Date().toISOString();
 
             if (!existingTx) {
-              await supabase.from('transactions').insert([{
+              await insertTransactionResilient(supabase, {
                 host_id: effectiveUuid,
                 gift_title: giftTitle,
                 gift_id: giftId || null,
@@ -672,10 +780,10 @@ async function startServer() {
                 payment_id: paymentId,
                 external_reference: externalReference || null,
                 date: txDate
-              }]);
+              });
             } else {
               // Upgrade existing record to approved
-              await supabase.from('transactions')
+              const { error: updErr } = await supabase.from('transactions')
                 .update({
                   status: 'approved',
                   method: methodFriendly,
@@ -686,6 +794,18 @@ async function startServer() {
                   date: txDate
                 })
                 .eq('id', existingTx.id);
+              if (updErr) {
+                await supabase.from('transactions')
+                  .update({
+                    status: 'approved',
+                    method: methodFriendly,
+                    amount: netAmount,
+                    donor_name: donorName,
+                    gift_title: giftTitle,
+                    date: txDate
+                  })
+                  .eq('id', existingTx.id);
+              }
             }
           }
         } catch (supabaseTxErr) {
@@ -812,12 +932,53 @@ async function startServer() {
     return { id: hostId };
   }
 
-  // 4. API to fetch stored transactions for host
+  // 4. API to fetch stored transactions for host (merges local store + Supabase)
   app.get("/api/transactions", async (req, res) => {
     const hostId = (req.query.hostId as string) || 'default';
     const { id, alternate } = await resolveHostIds(hostId);
-    const txs = getStoredTransactions(id, alternate);
-    res.json(txs);
+    const effectiveUuid = isUuid(id) ? id : (isUuid(alternate) ? alternate : null);
+    const localTxs = getStoredTransactions(id, alternate);
+
+    const merged: any[] = [...localTxs];
+    const authClient = getAuthenticatedSupabase(req);
+
+    if (authClient && effectiveUuid && hostId !== 'default') {
+      try {
+        const { data: dbTxs } = await authClient
+          .from('transactions')
+          .select('*')
+          .eq('host_id', effectiveUuid);
+
+        if (dbTxs && dbTxs.length > 0) {
+          dbTxs.forEach((t: any) => {
+            const extRef = (t.external_reference || '').trim();
+            if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return;
+            const isGift =
+              Boolean(t.gift_id && String(t.gift_id).trim() !== '') ||
+              (extRef.includes(':') && extRef.split(':').length >= 2) ||
+              t.method === 'Pix Direto';
+            if (!isGift) return;
+            merged.push({
+              id: t.id,
+              host_id: t.host_id,
+              gift_id: t.gift_id || undefined,
+              giftTitle: t.gift_title,
+              donorName: t.donor_name,
+              amount: Number(t.amount),
+              method: t.method,
+              status: t.status,
+              date: t.date,
+              payment_id: t.payment_id || undefined,
+              external_reference: t.external_reference || undefined
+            });
+          });
+        }
+      } catch (e) {
+        console.warn("Could not fetch transactions from Supabase:", e);
+      }
+    }
+
+    res.json(merged);
   });
 
   // 5. API to fetch active reservations and stock deductions

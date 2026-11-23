@@ -115,7 +115,7 @@ export default function PaymentModal({ gift, isOpen, onClose }: PaymentModalProp
 
       try {
         await refreshReservations();
-        await refreshTransactions();
+        await refreshTransactions(data.transaction ? [data.transaction] : undefined);
       } catch {}
 
       setManualPixStep('done');

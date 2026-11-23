@@ -310,9 +310,9 @@ export function releaseReservation(reservationId: string, hostId?: string): bool
   if (res && res.status === 'reserved') {
     res.status = 'released';
     
-    // Also update transaction if in checkout_started
+    // Also update transaction if still waiting for payment
     const tx = store.transactions.find(t => t.external_reference === reservationId);
-    if (tx && tx.status === 'checkout_started') {
+    if (tx && (tx.status === 'checkout_started' || tx.status === 'pending')) {
       tx.status = 'cancelled';
     }
 
@@ -333,8 +333,10 @@ export function getStoredTransactions(hostId: string, alternateId?: string): Sto
     const extRef = (t.external_reference || '').trim();
     if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
 
-    // STRICT: Must be a wedding gift transaction
-    const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
+    // Must be a wedding gift transaction or manual Pix Direto entry
+    const isGift = Boolean(t.gift_id && t.gift_id.trim() !== '') ||
+                   (extRef.includes(':') && extRef.split(':').length >= 2) ||
+                   t.method === 'Pix Direto';
     if (!isGift) return false;
 
     if (hostId === 'all') return true;
@@ -346,14 +348,18 @@ export function getStoredTransactions(hostId: string, alternateId?: string): Sto
     );
   });
 
-  // Track approved external_references and payment_ids
+  // Track approved external_references, payment_ids, and manual Pix signatures
   const approvedRefs = new Set<string>();
   const approvedPaymentIds = new Set<string>();
+  const approvedManualSigs = new Set<string>();
 
   matched.forEach(t => {
-    if (t.status === 'approved') {
+    if (t.status === 'approved' || t.status === 'Concluído') {
       if (t.external_reference) approvedRefs.add(t.external_reference);
       if (t.payment_id) approvedPaymentIds.add(t.payment_id);
+      if (t.method === 'Pix Direto') {
+        approvedManualSigs.add(`${(t.donorName || '').trim().toLowerCase()}_${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`);
+      }
     }
   });
 
@@ -361,17 +367,34 @@ export function getStoredTransactions(hostId: string, alternateId?: string): Sto
   const deduplicated: StoredTransaction[] = [];
   const seenKeys = new Set<string>();
 
-  for (const t of matched) {
-    if (t.status !== 'approved') {
+  const sorted = [...matched].sort((a, b) => {
+    const aApp = a.status === 'approved' || a.status === 'Concluído' ? 1 : 0;
+    const bApp = b.status === 'approved' || b.status === 'Concluído' ? 1 : 0;
+    if (aApp !== bApp) return bApp - aApp;
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
+
+  for (const t of sorted) {
+    if (t.status !== 'approved' && t.status !== 'Concluído') {
       if (t.external_reference && approvedRefs.has(t.external_reference)) {
-        continue; // Discard obsolete pending clone
+        continue;
       }
       if (t.payment_id && approvedPaymentIds.has(t.payment_id)) {
         continue;
       }
+      if (t.method === 'Pix Direto') {
+        const sig = `${(t.donorName || '').trim().toLowerCase()}_${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`;
+        if (approvedManualSigs.has(sig)) continue;
+      }
     }
 
-    const key = t.payment_id ? `pid_${t.payment_id}` : (t.external_reference ? `ref_${t.external_reference}` : `id_${t.id}`);
+    const key = t.payment_id
+      ? `pid_${t.payment_id}`
+      : (t.external_reference
+          ? `ref_${t.external_reference}`
+          : (t.method === 'Pix Direto'
+              ? `manual_${(t.donorName || '').trim().toLowerCase()}_${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`
+              : `id_${t.id}`));
     if (!seenKeys.has(key)) {
       seenKeys.add(key);
       deduplicated.push(t);
@@ -563,19 +586,118 @@ export function createManualPixPendingTransaction(params: {
   return tx;
 }
 
-export function approveManualTransactionInStore(txIdOrRef: string): StoredTransaction | null {
-  const store = ensureStoreExists();
-  const tx = store.transactions.find(t => t.id === txIdOrRef || t.external_reference === txIdOrRef);
-  if (!tx) return null;
+export interface ManualApproveParams {
+  transactionId?: string;
+  externalReference?: string;
+  hostId?: string;
+  alternateHostId?: string;
+  giftId?: string;
+  giftTitle?: string;
+  donorName?: string;
+  amount?: number;
+  method?: string;
+  date?: string;
+}
 
-  tx.status = 'approved';
-  if (tx.external_reference) {
-    const res = store.reservations.find(r => r.id === tx.external_reference);
+export function approveManualTransactionInStore(txIdOrParams: string | ManualApproveParams): StoredTransaction | null {
+  const params: ManualApproveParams = typeof txIdOrParams === 'string'
+    ? { transactionId: txIdOrParams, externalReference: txIdOrParams }
+    : txIdOrParams;
+
+  const store = ensureStoreExists();
+  const {
+    transactionId,
+    externalReference,
+    hostId,
+    alternateHostId,
+    giftId,
+    giftTitle,
+    donorName,
+    amount,
+    method,
+    date
+  } = params;
+
+  let tx = store.transactions.find(t =>
+    (transactionId && t.id === transactionId) ||
+    (externalReference && t.external_reference === externalReference) ||
+    (transactionId && t.external_reference === transactionId)
+  );
+
+  // Fallback match by host + donor + gift + amount for rows originating from Supabase without external_reference
+  if (!tx && hostId && donorName && giftTitle) {
+    tx = store.transactions.find(t =>
+      (t.host_id === hostId || (alternateHostId && t.host_id === alternateHostId)) &&
+      t.donorName?.trim().toLowerCase() === donorName.trim().toLowerCase() &&
+      t.giftTitle?.trim().toLowerCase() === giftTitle.trim().toLowerCase() &&
+      (amount === undefined || Math.abs(Number(t.amount) - Number(amount)) < 0.05)
+    );
+  }
+
+  const wasAlreadyApproved = tx?.status === 'approved';
+
+  if (tx) {
+    tx.status = 'approved';
+    if (giftId && !tx.gift_id) tx.gift_id = giftId;
+    if (externalReference && !tx.external_reference) tx.external_reference = externalReference;
+  } else if (hostId && (giftTitle || donorName)) {
+    const cleanAmount = Number(amount || 0);
+    tx = {
+      id: transactionId || `tx_manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      host_id: hostId,
+      gift_id: giftId,
+      giftTitle: giftTitle || 'Presente',
+      donorName: donorName || 'Convidado',
+      amount: cleanAmount,
+      grossAmount: cleanAmount,
+      netAmount: cleanAmount,
+      feeAmount: 0,
+      method: method || 'Pix Direto',
+      status: 'approved',
+      date: date || new Date().toISOString(),
+      external_reference: externalReference
+    };
+    store.transactions.unshift(tx);
+  } else {
+    return null;
+  }
+
+  // Mark matching reservation as paid
+  const targetRef = tx.external_reference || externalReference;
+  if (targetRef) {
+    const res = store.reservations.find(r => r.id === targetRef);
+    if (res) res.status = 'paid';
+  } else if (tx.gift_id || giftId) {
+    const targetGiftId = tx.gift_id || giftId;
+    const res = store.reservations.find(r =>
+      r.status === 'reserved' &&
+      r.giftId === targetGiftId &&
+      (!tx!.donorName || r.donorName?.trim().toLowerCase() === tx!.donorName.trim().toLowerCase())
+    );
     if (res) res.status = 'paid';
   }
-  if (tx.gift_id) {
-    store.stockDeductions[tx.gift_id] = (store.stockDeductions[tx.gift_id] || 0) + 1;
+
+  // Track stock deduction once when transitioning to approved
+  const effectiveGiftId = tx.gift_id || giftId;
+  if (!wasAlreadyApproved && effectiveGiftId) {
+    store.stockDeductions[effectiveGiftId] = (store.stockDeductions[effectiveGiftId] || 0) + 1;
   }
+
+  // Remove obsolete pending duplicates for the same transaction
+  store.transactions = store.transactions.filter(t => {
+    if (t === tx) return true;
+    if (t.status === 'approved') return true;
+    if (tx!.external_reference && t.external_reference === tx!.external_reference) return false;
+    if (
+      t.method === 'Pix Direto' &&
+      t.donorName?.trim().toLowerCase() === tx!.donorName?.trim().toLowerCase() &&
+      t.giftTitle?.trim().toLowerCase() === tx!.giftTitle?.trim().toLowerCase() &&
+      Math.abs(Number(t.amount) - Number(tx!.amount)) < 0.05
+    ) {
+      return false;
+    }
+    return true;
+  });
 
   saveStore(store);
   return tx;

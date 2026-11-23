@@ -27,7 +27,7 @@ type AppContextType = {
   transactions: Transaction[];
   addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => Promise<void>;
   refreshTransactions: (freshTxs?: Transaction[]) => Promise<void>;
-  approveManualTransaction: (txId: string, externalReference?: string) => Promise<boolean>;
+  approveManualTransaction: (txId: string, externalReference?: string, txDetails?: Partial<Transaction>) => Promise<boolean>;
 
   reservations: any[];
   refreshReservations: () => Promise<void>;
@@ -60,41 +60,50 @@ export function reconcileTransactions(
   targetHostId: string,
   targetSlug?: string
 ): Transaction[] {
+  const buildManualSig = (t: Transaction) =>
+    `${(t.method || '').trim().toLowerCase()}__${(t.donorName || '').trim().toLowerCase()}__${(t.giftTitle || '').trim().toLowerCase()}__${Number(t.amount || 0).toFixed(2)}`;
+
   // 1. Exclude Mercado Livre, personal bank transfers, POTS, etc.
   const valid = txs.filter(t => {
     const extRef = (t.external_reference || '').trim();
     if (extRef.startsWith('20000') || extRef.startsWith('POTS') || extRef.startsWith('11081') || extRef.startsWith('ML')) return false;
 
-    // STRICT: Must be a wedding gift from the event! Personal transfers have no gift_id and no event reference
-    const hasGift = Boolean(t.gift_id && t.gift_id.trim() !== '') || (extRef.includes(':') && extRef.split(':').length >= 2);
-    if (!hasGift && t.id !== 'tx1' && t.id !== 'tx2') return false;
-    
+    const belongsToHost = targetHostId === 'default' || (
+      (Boolean(t.host_id) && (t.host_id === targetHostId || (Boolean(targetSlug) && t.host_id === targetSlug))) ||
+      (Boolean(extRef) && (extRef.startsWith(`${targetHostId}:`) || (Boolean(targetSlug) && extRef.startsWith(`${targetSlug}:`))))
+    );
+
     if (targetHostId !== 'default') {
       if (t.id === 'tx1' || t.id === 'tx2') return false;
-      
-      // STRICT ACCOUNT ISOLATION: Must belong to targetHostId (UUID) or targetSlug
-      const belongs = (
-        (Boolean(t.host_id) && (t.host_id === targetHostId || (Boolean(targetSlug) && t.host_id === targetSlug))) ||
-        (Boolean(extRef) && (extRef.startsWith(`${targetHostId}:`) || (Boolean(targetSlug) && extRef.startsWith(`${targetSlug}:`))))
-      );
-      if (!belongs) return false;
+      if (!belongsToHost) return false;
     }
+
+    // Must be a wedding gift transaction or Pix Direto (never allow generic/Mercado Livre purchases without gift tracking)
+    const hasGift =
+      Boolean(t.gift_id && String(t.gift_id).trim() !== '') ||
+      (extRef.includes(':') && extRef.split(':').length >= 2) ||
+      t.method === 'Pix Direto';
+    if (!hasGift && t.id !== 'tx1' && t.id !== 'tx2') return false;
+
     return true;
   });
 
   // 2. Identify all approved transactions and their matching keys
   const approvedRefs = new Set<string>();
   const approvedPids = new Set<string>();
-  const approvedGiftSignatures = new Map<string, { method: string, payment_id?: string }>();
+  const approvedIds = new Set<string>();
+  const approvedSignatures = new Map<string, { method: string; payment_id?: string; external_reference?: string }>();
 
   valid.forEach(t => {
     if (t.status === 'approved' || t.status === 'Concluído') {
+      if (t.id) approvedIds.add(t.id);
       if (t.payment_id) approvedPids.add(t.payment_id);
       if (t.external_reference) approvedRefs.add(t.external_reference);
-      const sig = `${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`;
-      approvedGiftSignatures.set(sig, {
+      const sig = buildManualSig(t);
+      approvedSignatures.set(sig, {
         method: t.method === 'Aguardando' ? 'PIX' : t.method,
-        payment_id: t.payment_id
+        payment_id: t.payment_id,
+        external_reference: t.external_reference
       });
     }
   });
@@ -102,29 +111,30 @@ export function reconcileTransactions(
   // 3. Upgrade any pending transaction that has an approved match
   const upgraded = valid.map(t => {
     if (t.status !== 'approved' && t.status !== 'Concluído') {
-      const sig = `${(t.giftTitle || '').trim().toLowerCase()}_${Number(t.amount).toFixed(2)}`;
-      const hasRefMatch = t.external_reference && approvedRefs.has(t.external_reference);
-      const hasPidMatch = t.payment_id && approvedPids.has(t.payment_id);
-      const hasSigMatch = approvedGiftSignatures.has(sig);
+      const sig = buildManualSig(t);
+      const hasIdMatch = Boolean(t.id && approvedIds.has(t.id));
+      const hasRefMatch = Boolean(t.external_reference && approvedRefs.has(t.external_reference));
+      const hasPidMatch = Boolean(t.payment_id && approvedPids.has(t.payment_id));
+      const hasSigMatch = approvedSignatures.has(sig);
 
-      if (hasRefMatch || hasPidMatch || hasSigMatch) {
-        const matchInfo = approvedGiftSignatures.get(sig);
+      if (hasIdMatch || hasRefMatch || hasPidMatch || hasSigMatch) {
+        const matchInfo = approvedSignatures.get(sig);
         return {
           ...t,
           status: 'approved' as const,
           method: (t.method === 'Aguardando' || !t.method ? (matchInfo?.method || 'PIX') : t.method) as any,
-          payment_id: t.payment_id || matchInfo?.payment_id
+          payment_id: t.payment_id || matchInfo?.payment_id,
+          external_reference: t.external_reference || matchInfo?.external_reference
         };
       }
     }
     return t;
   });
 
-  // 4. Deduplicate: only 1 entry per payment_id or external_reference, approved taking priority
+  // 4. Deduplicate: only 1 entry per payment_id, external_reference, or manual donor+gift+amount signature, approved taking priority
   const deduplicated: Transaction[] = [];
   const seenKeys = new Set<string>();
 
-  // Sort approved first so they take priority
   const sorted = [...upgraded].sort((a, b) => {
     const aApp = a.status === 'approved' || a.status === 'Concluído' ? 1 : 0;
     const bApp = b.status === 'approved' || b.status === 'Concluído' ? 1 : 0;
@@ -133,15 +143,26 @@ export function reconcileTransactions(
   });
 
   for (const t of sorted) {
-    // If pending and an approved version with same external_reference or payment_id exists, drop pending copy
     if (t.status !== 'approved' && t.status !== 'Concluído') {
       if (t.external_reference && approvedRefs.has(t.external_reference)) continue;
       if (t.payment_id && approvedPids.has(t.payment_id)) continue;
+      if (t.method === 'Pix Direto' && approvedSignatures.has(buildManualSig(t))) continue;
     }
 
-    const key = t.payment_id ? `pid_${t.payment_id}` : (t.external_reference ? `ref_${t.external_reference}` : `id_${t.id}`);
-    if (!seenKeys.has(key)) {
-      seenKeys.add(key);
+    const dedupKey = t.payment_id
+      ? `pid_${t.payment_id}`
+      : (t.external_reference
+          ? `ref_${t.external_reference}`
+          : (t.method === 'Pix Direto'
+              ? `sig_${buildManualSig(t)}`
+              : `id_${t.id}`));
+
+    // Also deduplicate Pix Direto rows where one has external_reference (from server store) and another came from Supabase (without external_reference)
+    const manualSigKey = t.method === 'Pix Direto' ? `manualsig_${buildManualSig(t)}` : null;
+
+    if (!seenKeys.has(dedupKey) && (!manualSigKey || !seenKeys.has(manualSigKey))) {
+      seenKeys.add(dedupKey);
+      if (manualSigKey) seenKeys.add(manualSigKey);
       deduplicated.push(t);
     }
   }
@@ -369,9 +390,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         
         let txList: Transaction[] = txData && txData.length > 0 ? txData.map(t => ({
           id: t.id,
+          host_id: t.host_id || actualHostId,
+          gift_id: t.gift_id || undefined,
           giftTitle: t.gift_title,
           donorName: t.donor_name,
-          amount: t.amount,
+          amount: Number(t.amount),
           method: t.method as any,
           date: t.date,
           status: t.status as any,
@@ -381,8 +404,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
         // Fetch from persistent server store (captures webhooks, Pix payments, reservations)
         try {
+          let accessJwt: string | undefined;
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            accessJwt = session?.access_token;
+          } catch {}
+
           const [txServerRes, resRes] = await Promise.all([
-            fetch(`/api/transactions?hostId=${actualHostId}`),
+            fetch(`/api/transactions?hostId=${actualHostId}`, {
+              headers: accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {}
+            }),
             fetch(`/api/reservations?hostId=${actualHostId}`)
           ]);
 
@@ -750,22 +781,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     if (!resolvedHostId) return;
     try {
       const currentSlug = eventDetails?.slug || '';
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedHostId);
+
+      let accessJwt: string | undefined;
+      if (supabase) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          accessJwt = session?.access_token;
+        } catch {}
+      }
+
       const [txServerRes, supabaseRes] = await Promise.all([
-        freshTxs ? Promise.resolve({ ok: true, json: async () => freshTxs }) : fetch(`/api/transactions?hostId=${resolvedHostId}`),
-        supabase && resolvedHostId !== 'default' 
-          ? supabase.from('transactions').select('*').or(`host_id.eq.${resolvedHostId},host_id.eq.${currentSlug || resolvedHostId}`)
+        freshTxs && !accessJwt
+          ? Promise.resolve({ ok: true, json: async () => freshTxs })
+          : fetch(`/api/transactions?hostId=${resolvedHostId}`, {
+              headers: accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {}
+            }),
+        supabase && resolvedHostId !== 'default' && isValidUuid
+          ? supabase.from('transactions').select('*').eq('host_id', resolvedHostId)
           : Promise.resolve({ data: null })
       ]);
 
-      const pool: Transaction[] = [...transactions];
+      const fetchedPool: Transaction[] = [];
+
+      if (freshTxs && Array.isArray(freshTxs)) {
+        fetchedPool.push(...freshTxs);
+      }
 
       if (supabaseRes.data && supabaseRes.data.length > 0) {
         supabaseRes.data.forEach((t: any) => {
-          pool.push({
+          fetchedPool.push({
             id: t.id,
+            host_id: t.host_id || resolvedHostId,
+            gift_id: t.gift_id || undefined,
             giftTitle: t.gift_title,
             donorName: t.donor_name,
-            amount: t.amount,
+            amount: Number(t.amount),
             method: t.method as any,
             date: t.date,
             status: t.status as any,
@@ -778,29 +829,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       if (txServerRes.ok) {
         const serverTxs: any[] = await txServerRes.json();
         if (Array.isArray(serverTxs)) {
-          pool.push(...serverTxs);
+          fetchedPool.push(...serverTxs);
         }
       }
 
-      if (freshTxs && Array.isArray(freshTxs)) {
-        pool.push(...freshTxs);
-      }
-
-      const merged = reconcileTransactions(pool, resolvedHostId, currentSlug);
-
-      setTransactions(merged);
-      try {
-        localStorage.setItem(`wedding_tech_${resolvedHostId}_transactions`, JSON.stringify(merged));
-        if (currentSlug) {
-          localStorage.setItem(`wedding_tech_${currentSlug}_transactions`, JSON.stringify(merged));
-        }
-      } catch {}
+      setTransactions(prev => {
+        const merged = reconcileTransactions([...fetchedPool, ...prev], resolvedHostId, currentSlug);
+        try {
+          localStorage.setItem(`wedding_tech_${resolvedHostId}_transactions`, JSON.stringify(merged));
+          if (currentSlug) {
+            localStorage.setItem(`wedding_tech_${currentSlug}_transactions`, JSON.stringify(merged));
+          }
+        } catch {}
+        return merged;
+      });
     } catch (e) {
       console.warn("Error refreshing transactions:", e);
     }
   };
 
-  const approveManualTransaction = async (txId: string, externalReference?: string): Promise<boolean> => {
+  const approveManualTransaction = async (
+    txId: string,
+    externalReference?: string,
+    txDetails?: Partial<Transaction>
+  ): Promise<boolean> => {
     try {
       let accessJwt: string | undefined;
       if (supabase) {
@@ -808,25 +860,156 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         accessJwt = session?.access_token;
       }
 
-      const res = await fetch('/api/transactions/approve-manual', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {})
-        },
-        body: JSON.stringify({
-          hostId: resolvedHostId,
-          transactionId: txId,
-          externalReference
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setTransactions(prev => prev.map(t => (t.id === txId || (externalReference && t.external_reference === externalReference)) ? { ...t, status: 'approved' } : t));
+      const isUuid = (v?: string) => Boolean(v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+
+      // 1. Call backend API (handles local server store + Supabase update + stock deduction)
+      let apiData: any = { success: false };
+      try {
+        const res = await fetch('/api/transactions/approve-manual', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {})
+          },
+          body: JSON.stringify({
+            hostId: resolvedHostId,
+            transactionId: txId,
+            externalReference,
+            giftId: txDetails?.gift_id,
+            giftTitle: txDetails?.giftTitle,
+            donorName: txDetails?.donorName,
+            amount: txDetails?.amount,
+            method: txDetails?.method,
+            date: txDetails?.date
+          })
+        });
+        apiData = await res.json();
+      } catch (apiErr) {
+        console.warn("Approve manual API call error:", apiErr);
+      }
+
+      // 2. Also ensure authenticated browser client updates Supabase directly if needed (resilient across Vercel / missing columns)
+      let directDbUpdated = Boolean(apiData?.updatedInDb);
+      if (supabase && resolvedHostId !== 'default' && !directDbUpdated) {
+        try {
+          if (externalReference) {
+            const { data: extUpd, error: extErr } = await supabase
+              .from('transactions')
+              .update({ status: 'approved' })
+              .eq('external_reference', externalReference)
+              .select();
+            if (!extErr && extUpd && extUpd.length > 0) directDbUpdated = true;
+          }
+
+          if (!directDbUpdated && isUuid(txId)) {
+            const { data: idUpd, error: idErr } = await supabase
+              .from('transactions')
+              .update({ status: 'approved' })
+              .eq('id', txId)
+              .select();
+            if (!idErr && idUpd && idUpd.length > 0) directDbUpdated = true;
+          }
+
+          if (!directDbUpdated && isUuid(resolvedHostId) && txDetails?.donorName && txDetails?.giftTitle) {
+            const { data: matched } = await supabase
+              .from('transactions')
+              .select('id')
+              .eq('host_id', resolvedHostId)
+              .eq('donor_name', txDetails.donorName)
+              .eq('gift_title', txDetails.giftTitle)
+              .in('status', ['pending', 'Pendente']);
+            if (matched && matched.length > 0) {
+              const { data: updRows } = await supabase
+                .from('transactions')
+                .update({ status: 'approved' })
+                .eq('id', matched[0].id)
+                .select();
+              if (updRows && updRows.length > 0) directDbUpdated = true;
+            }
+          }
+
+          if (directDbUpdated && txDetails?.gift_id && isUuid(txDetails.gift_id)) {
+            const { data: giftData } = await supabase
+              .from('gifts')
+              .select('id, quantity')
+              .eq('id', txDetails.gift_id)
+              .maybeSingle();
+            if (giftData && giftData.quantity !== undefined && giftData.quantity !== null && giftData.quantity > 0) {
+              await supabase
+                .from('gifts')
+                .update({ quantity: Math.max(0, giftData.quantity - 1) })
+                .eq('id', txDetails.gift_id);
+            }
+          }
+        } catch (supErr) {
+          console.warn("Direct Supabase approval fallback warning:", supErr);
+        }
+      }
+
+      if (apiData?.success || directDbUpdated) {
+        const currentSlug = eventDetails?.slug || '';
+        const targetDonor = (txDetails?.donorName || apiData?.transaction?.donorName || '').trim().toLowerCase();
+        const targetGiftTitle = (txDetails?.giftTitle || apiData?.transaction?.giftTitle || '').trim().toLowerCase();
+        const targetAmount = txDetails?.amount ?? apiData?.transaction?.amount;
+
+        const matchesTx = (t: Transaction) =>
+          t.id === txId ||
+          (Boolean(externalReference) && t.external_reference === externalReference) ||
+          (Boolean(targetDonor && targetGiftTitle) &&
+            t.method === 'Pix Direto' &&
+            (t.donorName || '').trim().toLowerCase() === targetDonor &&
+            (t.giftTitle || '').trim().toLowerCase() === targetGiftTitle &&
+            (targetAmount === undefined || Math.abs(Number(t.amount) - Number(targetAmount)) < 0.05));
+
+        const approvedSnapshot: Transaction | null = (apiData?.transaction || txDetails)
+          ? {
+              id: apiData?.transaction?.id || txId,
+              host_id: apiData?.transaction?.host_id || resolvedHostId,
+              gift_id: apiData?.transaction?.gift_id || txDetails?.gift_id,
+              giftTitle: apiData?.transaction?.giftTitle || txDetails?.giftTitle || 'Presente',
+              donorName: apiData?.transaction?.donorName || txDetails?.donorName || 'Convidado',
+              amount: Number(apiData?.transaction?.amount ?? txDetails?.amount ?? 0),
+              grossAmount: apiData?.transaction?.grossAmount ?? txDetails?.grossAmount,
+              netAmount: apiData?.transaction?.netAmount ?? txDetails?.netAmount,
+              feeAmount: apiData?.transaction?.feeAmount ?? txDetails?.feeAmount,
+              method: (apiData?.transaction?.method || txDetails?.method || 'Pix Direto') as any,
+              date: apiData?.transaction?.date || txDetails?.date || new Date().toISOString(),
+              status: 'approved',
+              external_reference: apiData?.transaction?.external_reference || externalReference
+            }
+          : null;
+
+        setTransactions(prev => {
+          const updated = prev.map(t => (matchesTx(t) ? { ...t, status: 'approved' as const } : t));
+          if (approvedSnapshot && !updated.some(t => matchesTx(t) && t.status === 'approved')) {
+            updated.unshift(approvedSnapshot);
+          }
+          const reconciled = reconcileTransactions(updated, resolvedHostId, currentSlug);
+          try {
+            localStorage.setItem(`wedding_tech_${resolvedHostId}_transactions`, JSON.stringify(reconciled));
+            if (currentSlug) {
+              localStorage.setItem(`wedding_tech_${currentSlug}_transactions`, JSON.stringify(reconciled));
+            }
+          } catch {}
+          return reconciled;
+        });
+
+        const approvedGiftId = apiData?.transaction?.gift_id || txDetails?.gift_id;
+        if (approvedGiftId) {
+          setGifts(prev =>
+            prev.map(g =>
+              g.id === approvedGiftId && g.quantity !== undefined && g.quantity > 0
+                ? { ...g, quantity: Math.max(0, g.quantity - 1) }
+                : g
+            )
+          );
+        }
+
         await refreshReservations();
-        await refreshTransactions();
+        await refreshTransactions(approvedSnapshot ? [approvedSnapshot] : undefined);
         return true;
       }
+
       return false;
     } catch (e) {
       console.warn("Error approving manual transaction:", e);
@@ -856,6 +1039,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       });
       const data = await res.json();
       if (data.success) {
+        setTransactions(prev => prev.map(t =>
+          t.external_reference === reservationId && (t.status === 'checkout_started' || t.status === 'pending')
+            ? { ...t, status: 'cancelled' }
+            : t
+        ));
         await refreshReservations();
         await refreshTransactions();
         return true;

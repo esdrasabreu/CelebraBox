@@ -62,6 +62,7 @@ export default function AdminDashboard() {
 
   // Mercado Pago Sync State
   const [isSyncingMP, setIsSyncingMP] = useState(false);
+  const [approvingTxId, setApprovingTxId] = useState<string | null>(null);
 
   const handleSyncMercadoPago = async (silent = false) => {
     setIsSyncingMP(true);
@@ -1300,20 +1301,26 @@ export default function AdminDashboard() {
                       ) : null}
                     </div>
                     <div className="flex items-center gap-3 text-right">
-                      {tx.method === 'Pix Direto' && tx.status === 'pending' && (
+                      {(tx.method === 'Pix Direto' || tx.method?.toLowerCase().includes('pix direto')) && (tx.status === 'pending' || tx.status === 'Pendente') && (
                         <button
                           type="button"
+                          disabled={approvingTxId === tx.id}
                           onClick={async () => {
-                            const ok = await approveManualTransaction(tx.id, tx.external_reference);
-                            if (ok) {
-                              toast.success('Pix Direto confirmado com sucesso!');
-                            } else {
-                              toast.error('Não foi possível confirmar o Pix.');
+                            setApprovingTxId(tx.id);
+                            try {
+                              const ok = await approveManualTransaction(tx.id, tx.external_reference, tx);
+                              if (ok) {
+                                toast.success('Pix Direto confirmado com sucesso!');
+                              } else {
+                                toast.error('Não foi possível confirmar o Pix.');
+                              }
+                            } finally {
+                              setApprovingTxId(null);
                             }
                           }}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
                         >
-                          Confirmar Pix Recebido
+                          {approvingTxId === tx.id ? 'Confirmando...' : 'Confirmar Pix Recebido'}
                         </button>
                       )}
                       <div className="flex flex-col items-end">

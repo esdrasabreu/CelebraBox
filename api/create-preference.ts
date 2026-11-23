@@ -1,9 +1,47 @@
 import { MercadoPagoConfig, Preference } from 'mercadopago';
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getCheckoutBreakdown, PaymentChoice, roundCurrency } from '../src/lib/paymentFees';
+
+type PaymentChoice = 'mp_pix' | 'mp_card' | 'manual_pix';
+
+const roundCurrency = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+};
+
+const calculateGrossAmount = (netAmount: number, feePercent: number): number => {
+  const cleanNet = Math.max(0, Number(netAmount) || 0);
+  const cleanFee = Math.min(Math.max(Number(feePercent) || 0, 0), 99);
+  if (cleanFee <= 0 || cleanNet <= 0) return roundCurrency(cleanNet);
+  return roundCurrency(cleanNet / (1 - cleanFee / 100));
+};
+
+const getCheckoutBreakdown = (
+  netAmount: number,
+  choice: PaymentChoice,
+  options: { passFeesToBuyer?: boolean; pixFeePercent?: number; cardFeePercent?: number }
+) => {
+  const cleanNet = roundCurrency(Math.max(0, Number(netAmount) || 0));
+  if (choice === 'manual_pix' || options.passFeesToBuyer === false) {
+    return { netAmount: cleanNet, grossAmount: cleanNet, feeAmount: 0, feePercent: 0 };
+  }
+  const feePercent = choice === 'mp_pix'
+    ? Math.min(Math.max(Number(options.pixFeePercent ?? 0.99), 0), 99)
+    : Math.min(Math.max(Number(options.cardFeePercent ?? 4.98), 0), 99);
+  const grossAmount = calculateGrossAmount(cleanNet, feePercent);
+  const feeAmount = roundCurrency(Math.max(0, grossAmount - cleanNet));
+  return { netAmount: cleanNet, grossAmount, feeAmount, feePercent };
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
@@ -20,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       externalReference,
       gatewayAccessToken,
       paymentMethod = "any"
-    } = req.body;
+    } = req.body || {};
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
     const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || '';
