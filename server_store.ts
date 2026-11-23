@@ -21,6 +21,9 @@ export interface StoredTransaction {
   giftTitle: string;
   donorName: string;
   amount: number;
+  grossAmount?: number;
+  netAmount?: number;
+  feeAmount?: number;
   method: string;
   status: 'approved' | 'pending' | 'in_process' | 'rejected' | 'cancelled' | 'refunded' | 'expired' | 'checkout_started' | string;
   date: string;
@@ -36,11 +39,26 @@ export interface StoredGuest {
   confirmation_code?: string;
 }
 
+export interface StoredPublicPaymentConfig {
+  hostId: string;
+  gatewayProvider: string;
+  receiverName: string;
+  passFeesToBuyer: boolean;
+  pixFeePercent: number;
+  cardFeePercent: number;
+  enableManualPix: boolean;
+  pixKeyType?: string;
+  pixKey?: string;
+  city?: string;
+  updatedAt: string;
+}
+
 interface AppStoreData {
   reservations: GiftReservation[];
   transactions: StoredTransaction[];
   stockDeductions: Record<string, number>; // giftId -> count of deducted units
   guests?: StoredGuest[];
+  paymentConfigs?: Record<string, StoredPublicPaymentConfig>;
 }
 
 // In Vercel serverless functions, the root filesystem is read-only; /tmp is writable
@@ -57,7 +75,8 @@ function ensureStoreExists(): AppStoreData {
         reservations: [],
         transactions: [],
         stockDeductions: {},
-        guests: []
+        guests: [],
+        paymentConfigs: {}
       };
       try {
         fs.writeFileSync(STORE_FILE, JSON.stringify(initial, null, 2), 'utf8');
@@ -72,11 +91,12 @@ function ensureStoreExists(): AppStoreData {
       reservations: parsed.reservations || [],
       transactions: parsed.transactions || [],
       stockDeductions: parsed.stockDeductions || {},
-      guests: parsed.guests || []
+      guests: parsed.guests || [],
+      paymentConfigs: parsed.paymentConfigs || {}
     };
   } catch (err) {
     console.error("Error accessing app store:", err);
-    return { reservations: [], transactions: [], stockDeductions: {}, guests: [] };
+    return { reservations: [], transactions: [], stockDeductions: {}, guests: [], paymentConfigs: {} };
   }
 }
 
@@ -197,6 +217,9 @@ export function confirmPayment(params: {
   giftId?: string;
   externalReference?: string;
   amount: number;
+  grossAmount?: number;
+  netAmount?: number;
+  feeAmount?: number;
   method: string;
   donorName: string;
   giftTitle: string;
@@ -229,6 +252,9 @@ export function confirmPayment(params: {
     tx.status = 'approved';
     tx.method = params.method || 'PIX';
     tx.amount = params.amount || tx.amount;
+    if (params.grossAmount !== undefined) tx.grossAmount = params.grossAmount;
+    if (params.netAmount !== undefined) tx.netAmount = params.netAmount;
+    if (params.feeAmount !== undefined) tx.feeAmount = params.feeAmount;
     tx.payment_id = params.paymentId;
     tx.date = date;
     if (params.donorName && (!tx.donorName || tx.donorName === 'Convidado')) {
@@ -245,6 +271,9 @@ export function confirmPayment(params: {
       giftTitle: params.giftTitle || 'Presente',
       donorName: params.donorName || 'Convidado',
       amount: params.amount,
+      grossAmount: params.grossAmount,
+      netAmount: params.netAmount,
+      feeAmount: params.feeAmount,
       method: params.method || 'PIX',
       status: 'approved',
       date,
@@ -456,4 +485,98 @@ export function updateStoredGuestStatus(guestId: string, status: 'Pendente' | 'C
     return true;
   }
   return false;
+}
+
+export function saveStoredPaymentConfig(hostId: string, config: Omit<StoredPublicPaymentConfig, 'hostId' | 'updatedAt'>, alternateId?: string): StoredPublicPaymentConfig {
+  const store = ensureStoreExists();
+  if (!store.paymentConfigs) store.paymentConfigs = {};
+
+  const record: StoredPublicPaymentConfig = {
+    ...config,
+    hostId,
+    updatedAt: new Date().toISOString()
+  };
+
+  store.paymentConfigs[hostId] = record;
+  if (alternateId && alternateId !== hostId) {
+    store.paymentConfigs[alternateId] = { ...record, hostId: alternateId };
+  }
+
+  saveStore(store);
+  return record;
+}
+
+export function getStoredPaymentConfig(hostId: string, alternateId?: string): StoredPublicPaymentConfig | null {
+  const store = ensureStoreExists();
+  const configs = store.paymentConfigs || {};
+  return configs[hostId] || (alternateId ? configs[alternateId] : null) || null;
+}
+
+export function createManualPixPendingTransaction(params: {
+  hostId: string;
+  giftId: string;
+  giftTitle: string;
+  donorName: string;
+  amount: number;
+  externalReference: string;
+}): StoredTransaction {
+  const store = ensureStoreExists();
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+
+  const existingRes = store.reservations.find(r => r.id === params.externalReference);
+  if (!existingRes) {
+    store.reservations.push({
+      id: params.externalReference,
+      hostId: params.hostId,
+      giftId: params.giftId,
+      giftTitle: params.giftTitle,
+      donorName: params.donorName,
+      amount: params.amount,
+      createdAt: now.toISOString(),
+      expiresAt,
+      status: 'reserved'
+    });
+  }
+
+  let tx = store.transactions.find(t => t.external_reference === params.externalReference);
+  if (!tx) {
+    tx = {
+      id: `tx_manual_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      host_id: params.hostId,
+      gift_id: params.giftId,
+      giftTitle: params.giftTitle,
+      donorName: params.donorName,
+      amount: params.amount,
+      grossAmount: params.amount,
+      netAmount: params.amount,
+      feeAmount: 0,
+      method: 'Pix Direto',
+      status: 'pending',
+      date: now.toISOString(),
+      external_reference: params.externalReference
+    };
+    store.transactions.unshift(tx);
+  }
+
+  saveStore(store);
+  return tx;
+}
+
+export function approveManualTransactionInStore(txIdOrRef: string): StoredTransaction | null {
+  const store = ensureStoreExists();
+  const tx = store.transactions.find(t => t.id === txIdOrRef || t.external_reference === txIdOrRef);
+  if (!tx) return null;
+
+  tx.status = 'approved';
+  if (tx.external_reference) {
+    const res = store.reservations.find(r => r.id === tx.external_reference);
+    if (res) res.status = 'paid';
+  }
+  if (tx.gift_id) {
+    store.stockDeductions[tx.gift_id] = (store.stockDeductions[tx.gift_id] || 0) + 1;
+  }
+
+  saveStore(store);
+  return tx;
 }

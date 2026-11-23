@@ -108,7 +108,11 @@ export const initialPaymentSettings: PaymentSettings = {
   gatewayProvider: 'mercadopago',
   gatewayPublicKey: 'APP_USR-e3868214-9c52-4001-bd10-ea0046f39930',
   gatewayEnvironment: 'sandbox',
-  gatewayWebhookUrl: ''
+  gatewayWebhookUrl: '',
+  passFeesToBuyer: true,
+  pixFeePercent: 0.99,
+  cardFeePercent: 4.98,
+  enableManualPix: false
 };
 
 export const initialGallery: GalleryImage[] = [

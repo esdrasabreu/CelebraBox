@@ -23,7 +23,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const externalReference = paymentInfo.external_reference || '';
         const paymentMethodId = paymentInfo.payment_method_id;
         const paymentTypeId = paymentInfo.payment_type_id;
-        const amount = Number(paymentInfo.transaction_amount || 0);
+        const grossAmount = Math.round((Number(paymentInfo.transaction_amount || 0) + Number.EPSILON) * 100) / 100;
+        const mpNet = Math.round((Number(paymentInfo.transaction_details?.net_received_amount || 0) + Number.EPSILON) * 100) / 100;
+        const amount = mpNet > 0 ? mpNet : grossAmount;
 
         let methodFriendly = 'PIX';
         if (paymentMethodId === 'pix') methodFriendly = 'PIX';
@@ -34,7 +36,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let hostId = paymentInfo.metadata?.host_id || '';
         let giftId = paymentInfo.metadata?.gift_id || '';
         let donorName = paymentInfo.metadata?.donor_name || 'Convidado';
-        let giftTitle = paymentInfo.additional_info?.items?.[0]?.title || 'Presente';
+        let giftTitle = String(paymentInfo.additional_info?.items?.[0]?.title || 'Presente')
+          .replace(/\s*\(inclui taxa de processamento\)$/i, '').trim();
 
         if (externalReference && externalReference.includes(':')) {
           const parts = externalReference.split(':');

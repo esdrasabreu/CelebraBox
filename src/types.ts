@@ -56,7 +56,10 @@ export type Transaction = {
   giftTitle: string;
   donorName: string;
   amount: number;
-  method: 'Aguardando' | 'PIX' | 'Cartão de Crédito' | 'Cartão de Débito' | 'Boleto' | 'Outro' | string;
+  grossAmount?: number;
+  netAmount?: number;
+  feeAmount?: number;
+  method: 'Aguardando' | 'PIX' | 'Pix Direto' | 'Cartão de Crédito' | 'Cartão de Débito' | 'Boleto' | 'Outro' | string;
   date: string;
   status: 'checkout_started' | 'pending' | 'in_process' | 'approved' | 'rejected' | 'cancelled' | 'refunded' | 'expired' | 'Concluído' | 'Pendente';
   created_at?: string;
@@ -73,6 +76,10 @@ export type PaymentSettings = {
   gatewayAccessToken?: string;
   gatewayEnvironment: 'sandbox' | 'production';
   gatewayWebhookUrl?: string;
+  passFeesToBuyer?: boolean;
+  pixFeePercent?: number;
+  cardFeePercent?: number;
+  enableManualPix?: boolean;
 };
 
 export type PaymentAccount = {

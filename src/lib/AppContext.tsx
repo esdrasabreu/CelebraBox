@@ -27,6 +27,7 @@ type AppContextType = {
   transactions: Transaction[];
   addTransaction: (transaction: Omit<Transaction, 'id' | 'date'>) => Promise<void>;
   refreshTransactions: (freshTxs?: Transaction[]) => Promise<void>;
+  approveManualTransaction: (txId: string, externalReference?: string) => Promise<boolean>;
 
   reservations: any[];
   refreshReservations: () => Promise<void>;
@@ -252,6 +253,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           });
         }
         
+        let publicConfig: Partial<PaymentSettings> = {};
+        try {
+          const cfgRes = await fetch(`/api/payment-config?hostId=${actualHostId}`);
+          if (cfgRes.ok) {
+            publicConfig = await cfgRes.json();
+          }
+        } catch {
+          // ignore
+        }
+
         if (paymentData) {
           setPaymentSettingsState({
             pixKeyType: paymentData.pix_key_type as any,
@@ -262,12 +273,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
             gatewayPublicKey: paymentData.gateway_public_key || '',
             gatewayAccessToken: paymentData.gateway_access_token || '',
             gatewayEnvironment: paymentData.gateway_environment as any,
-            gatewayWebhookUrl: paymentData.gateway_webhook_url || ''
+            gatewayWebhookUrl: paymentData.gateway_webhook_url || '',
+            passFeesToBuyer: (paymentData as any).pass_fees_to_buyer !== undefined
+              ? Boolean((paymentData as any).pass_fees_to_buyer)
+              : (publicConfig.passFeesToBuyer !== undefined ? publicConfig.passFeesToBuyer : true),
+            pixFeePercent: (paymentData as any).pix_fee_percent !== undefined
+              ? Number((paymentData as any).pix_fee_percent)
+              : (publicConfig.pixFeePercent !== undefined ? Number(publicConfig.pixFeePercent) : 0.99),
+            cardFeePercent: (paymentData as any).card_fee_percent !== undefined
+              ? Number((paymentData as any).card_fee_percent)
+              : (publicConfig.cardFeePercent !== undefined ? Number(publicConfig.cardFeePercent) : 4.98),
+            enableManualPix: (paymentData as any).enable_manual_pix !== undefined
+              ? Boolean((paymentData as any).enable_manual_pix)
+              : Boolean(publicConfig.enableManualPix)
           });
         } else {
           setPaymentSettingsState({
-            pixKeyType: 'email', pixKey: '', receiverName: '', city: '',
-            gatewayProvider: 'mercadopago', gatewayPublicKey: '', gatewayAccessToken: '', gatewayEnvironment: 'sandbox', gatewayWebhookUrl: ''
+            pixKeyType: (publicConfig.pixKeyType as any) || 'email',
+            pixKey: publicConfig.pixKey || '',
+            receiverName: publicConfig.receiverName || '',
+            city: publicConfig.city || '',
+            gatewayProvider: (publicConfig.gatewayProvider as any) || 'mercadopago',
+            gatewayPublicKey: '',
+            gatewayAccessToken: '',
+            gatewayEnvironment: 'production',
+            gatewayWebhookUrl: '',
+            passFeesToBuyer: publicConfig.passFeesToBuyer !== undefined ? publicConfig.passFeesToBuyer : true,
+            pixFeePercent: publicConfig.pixFeePercent !== undefined ? Number(publicConfig.pixFeePercent) : 0.99,
+            cardFeePercent: publicConfig.cardFeePercent !== undefined ? Number(publicConfig.cardFeePercent) : 4.98,
+            enableManualPix: Boolean(publicConfig.enableManualPix)
           });
         }
         
@@ -460,7 +494,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
   
   const setPaymentSettings = async (settings: PaymentSettings) => {
     setPaymentSettingsState(settings);
+    let accessJwt: string | undefined;
+
     if (supabase && resolvedHostId !== 'default') {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessJwt = session?.access_token;
+      } catch {}
+
       await supabase.from('payment_settings').upsert({
         host_id: resolvedHostId,
         pix_key_type: settings.pixKeyType,
@@ -473,6 +514,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         gateway_environment: settings.gatewayEnvironment,
         gateway_webhook_url: settings.gatewayWebhookUrl
       });
+
+      // Persist extended fee columns if migration 003 has been applied (non-fatal otherwise)
+      try {
+        await supabase.from('payment_settings').update({
+          pass_fees_to_buyer: settings.passFeesToBuyer !== false,
+          pix_fee_percent: Number(settings.pixFeePercent ?? 0.99),
+          card_fee_percent: Number(settings.cardFeePercent ?? 4.98),
+          enable_manual_pix: Boolean(settings.enableManualPix)
+        }).eq('host_id', resolvedHostId);
+      } catch {
+        // ignore if columns don't exist in Supabase yet
+      }
+    }
+
+    // Persist public-safe fee configuration on server for guests
+    try {
+      await fetch('/api/payment-config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {})
+        },
+        body: JSON.stringify({
+          hostId: resolvedHostId,
+          gatewayProvider: settings.gatewayProvider,
+          receiverName: settings.receiverName,
+          passFeesToBuyer: settings.passFeesToBuyer !== false,
+          pixFeePercent: Number(settings.pixFeePercent ?? 0.99),
+          cardFeePercent: Number(settings.cardFeePercent ?? 4.98),
+          enableManualPix: Boolean(settings.enableManualPix),
+          pixKeyType: settings.pixKeyType,
+          pixKey: settings.pixKey,
+          city: settings.city
+        })
+      });
+    } catch (e) {
+      console.warn("Could not sync public payment config:", e);
     }
   };
 
@@ -722,6 +800,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
     }
   };
 
+  const approveManualTransaction = async (txId: string, externalReference?: string): Promise<boolean> => {
+    try {
+      let accessJwt: string | undefined;
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        accessJwt = session?.access_token;
+      }
+
+      const res = await fetch('/api/transactions/approve-manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(accessJwt ? { Authorization: `Bearer ${accessJwt}` } : {})
+        },
+        body: JSON.stringify({
+          hostId: resolvedHostId,
+          transactionId: txId,
+          externalReference
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTransactions(prev => prev.map(t => (t.id === txId || (externalReference && t.external_reference === externalReference)) ? { ...t, status: 'approved' } : t));
+        await refreshReservations();
+        await refreshTransactions();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.warn("Error approving manual transaction:", e);
+      return false;
+    }
+  };
+
   const refreshReservations = async () => {
     if (!resolvedHostId) return;
     try {
@@ -866,7 +978,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
       gifts, addGift, updateGift, deleteGift,
       messages, addMessage,
       guests, addGuest, updateGuest, deleteGuest,
-      transactions, addTransaction, refreshTransactions,
+      transactions, addTransaction, refreshTransactions, approveManualTransaction,
       reservations, refreshReservations, releaseReservation,
       gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
       schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,

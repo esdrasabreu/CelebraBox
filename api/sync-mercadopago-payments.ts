@@ -106,7 +106,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (p.status === 'approved') {
         const paymentId = String(p.id);
         const externalReference = (p.external_reference || '').trim();
-        const amount = Number(p.transaction_amount || 0);
+        const grossAmount = Math.round((Number(p.transaction_amount || 0) + Number.EPSILON) * 100) / 100;
+        const mpNetReceived = Math.round((Number(p.transaction_details?.net_received_amount || 0) + Number.EPSILON) * 100) / 100;
+        const collectorFeeSum = Array.isArray((p as any).fee_details)
+          ? Math.round((
+              (p as any).fee_details
+                .filter((f: any) => !f.fee_payer || f.fee_payer === 'collector')
+                .reduce((sum: number, f: any) => sum + Number(f.amount || 0), 0) + Number.EPSILON
+            ) * 100) / 100
+          : 0;
+        const feeAmount = collectorFeeSum > 0
+          ? collectorFeeSum
+          : (mpNetReceived > 0 && grossAmount > mpNetReceived ? Math.round((grossAmount - mpNetReceived + Number.EPSILON) * 100) / 100 : 0);
+        const amount = mpNetReceived > 0
+          ? mpNetReceived
+          : (grossAmount > feeAmount ? Math.round((grossAmount - feeAmount + Number.EPSILON) * 100) / 100 : grossAmount);
 
         let methodFriendly = 'PIX';
         if (p.payment_method_id === 'pix') methodFriendly = 'PIX';
@@ -117,7 +131,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let itemHostId = p.metadata?.host_id || '';
         let giftId = p.metadata?.gift_id || '';
         let donorName = p.metadata?.donor_name || (p.payer as any)?.first_name || p.payer?.email || 'Convidado';
-        let giftTitle = p.additional_info?.items?.[0]?.title || p.description || 'Presente';
+        let giftTitle = String(p.additional_info?.items?.[0]?.title || p.description || 'Presente')
+          .replace(/\s*\(inclui taxa de processamento\)$/i, '').trim();
 
         if (externalReference && externalReference.includes(':')) {
           const parts = externalReference.split(':');
@@ -238,6 +253,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             giftId,
             externalReference,
             amount,
+            grossAmount,
+            netAmount: amount,
+            feeAmount,
             method: methodFriendly,
             donorName,
             giftTitle,

@@ -9,6 +9,7 @@ import { uploadFile } from '../lib/storage';
 import { supabase } from '../lib/supabase';
 import { cleanStoryText } from '../lib/textUtils';
 import { optimizeRemoteImage } from '../lib/imageOptimizer';
+import { calculateGrossAmount } from '../lib/paymentFees';
 
 export default function AdminDashboard() {
   const { host, logout } = useAuth();
@@ -17,7 +18,7 @@ export default function AdminDashboard() {
     paymentSettings, setPaymentSettings,
     guests, addGuest, updateGuest, deleteGuest,
     gifts, addGift, updateGift, deleteGift,
-    transactions, refreshTransactions,
+    transactions, refreshTransactions, approveManualTransaction,
     reservations, refreshReservations, releaseReservation,
     gallery, addGalleryImage, updateGalleryImage, deleteGalleryImage,
     schedule, addScheduleItem, updateScheduleItem, deleteScheduleItem,
@@ -203,6 +204,10 @@ export default function AdminDashboard() {
     gatewayAccessToken: paymentSettings.gatewayAccessToken || '',
     gatewayEnvironment: paymentSettings.gatewayEnvironment,
     gatewayWebhookUrl: paymentSettings.gatewayWebhookUrl || '',
+    passFeesToBuyer: paymentSettings.passFeesToBuyer !== false,
+    pixFeePercent: paymentSettings.pixFeePercent ?? 0.99,
+    cardFeePercent: paymentSettings.cardFeePercent ?? 4.98,
+    enableManualPix: Boolean(paymentSettings.enableManualPix),
   });
 
   React.useEffect(() => {
@@ -234,6 +239,10 @@ export default function AdminDashboard() {
       gatewayAccessToken: paymentSettings.gatewayAccessToken || '',
       gatewayEnvironment: paymentSettings.gatewayEnvironment,
       gatewayWebhookUrl: paymentSettings.gatewayWebhookUrl || '',
+      passFeesToBuyer: paymentSettings.passFeesToBuyer !== false,
+      pixFeePercent: paymentSettings.pixFeePercent ?? 0.99,
+      cardFeePercent: paymentSettings.cardFeePercent ?? 4.98,
+      enableManualPix: Boolean(paymentSettings.enableManualPix),
     });
   }, [paymentSettings]);
 
@@ -495,6 +504,10 @@ export default function AdminDashboard() {
       gatewayAccessToken: paymentForm.gatewayAccessToken,
       gatewayEnvironment: paymentForm.gatewayEnvironment as any,
       gatewayWebhookUrl: paymentForm.gatewayWebhookUrl,
+      passFeesToBuyer: Boolean(paymentForm.passFeesToBuyer),
+      pixFeePercent: Number(paymentForm.pixFeePercent) || 0,
+      cardFeePercent: Number(paymentForm.cardFeePercent) || 0,
+      enableManualPix: Boolean(paymentForm.enableManualPix),
     };
     
     await setPaymentSettings(newSettings);
@@ -1280,10 +1293,34 @@ export default function AdminDashboard() {
                       <p className="text-xs text-slate-400 mt-1">
                         {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(tx.date))}
                       </p>
+                      {tx.grossAmount && tx.feeAmount && tx.feeAmount > 0 ? (
+                        <p className="text-[11px] text-slate-500 mt-1">
+                          Pago pelo convidado: <strong>R$ {tx.grossAmount.toFixed(2)}</strong> • Taxa MP: -R$ {tx.feeAmount.toFixed(2)}
+                        </p>
+                      ) : null}
                     </div>
-                    <div className="flex items-center gap-4 text-right">
+                    <div className="flex items-center gap-3 text-right">
+                      {tx.method === 'Pix Direto' && tx.status === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const ok = await approveManualTransaction(tx.id, tx.external_reference);
+                            if (ok) {
+                              toast.success('Pix Direto confirmado com sucesso!');
+                            } else {
+                              toast.error('Não foi possível confirmar o Pix.');
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          Confirmar Pix Recebido
+                        </button>
+                      )}
                       <div className="flex flex-col items-end">
                         <span className="font-bold text-[#d9006f]">R$ {tx.amount.toFixed(2)}</span>
+                        {tx.grossAmount && tx.feeAmount && tx.feeAmount > 0 ? (
+                          <span className="text-[10px] font-semibold text-emerald-700">Líquido na conta</span>
+                        ) : null}
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-xs font-medium bg-slate-200 text-slate-600 px-2 py-0.5 rounded">{tx.method}</span>
                           <span className={`text-xs font-medium px-2 py-0.5 rounded ${
@@ -1323,13 +1360,26 @@ export default function AdminDashboard() {
 
             <form onSubmit={handlePaymentSave} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-6">
               
-              <div className="border-b border-slate-100 pb-4 mb-4">
-                <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-2">
-                  <QrCode className="w-5 h-5 text-[#ef007e]" /> Configuração Pix (Manual)
-                </h3>
-                <p className="text-sm text-slate-500 mb-4">
-                  Esta chave será exibida ao convidado para pagamentos manuais via Pix (Copia e Cola). Confirmações de pagamento Pix manual devem ser verificadas diretamente no seu banco.
-                </p>
+              <div className="border-b border-slate-100 pb-6 mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                      <QrCode className="w-5 h-5 text-[#ef007e]" /> Pix Direto (Taxa Zero)
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                      Receba 100% do valor diretamente na sua conta bancária via QR Code Pix sem passar pelo checkout do Mercado Pago.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2.5 cursor-pointer bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={paymentForm.enableManualPix}
+                      onChange={e => setPaymentForm({ ...paymentForm, enableManualPix: e.target.checked })}
+                      className="w-4 h-4 accent-[#ef007e] rounded cursor-pointer"
+                    />
+                    <span className="text-xs font-semibold text-slate-700">Exibir na lista de presentes</span>
+                  </label>
+                </div>
                 
                 <div className="grid md:grid-cols-2 gap-4">
                   <div>
@@ -1383,7 +1433,7 @@ export default function AdminDashboard() {
 
               <div>
                 <h3 className="text-lg font-semibold text-slate-700 flex items-center gap-2 mb-4">
-                  <CreditCard className="w-5 h-5 text-[#ef007e]" /> Integração de Cartão de Crédito
+                  <CreditCard className="w-5 h-5 text-[#ef007e]" /> Integração de Cartão de Crédito & Pix Automático
                 </h3>
                 
                 <div className="grid md:grid-cols-2 gap-4">
@@ -1418,16 +1468,89 @@ export default function AdminDashboard() {
                       </p>
                     </div>
 
-                    <div className="p-4 bg-pink-50 border border-pink-200 rounded-lg flex gap-3">
-                      <div className="flex-shrink-0">
-                        <CreditCard className="w-5 h-5 text-[#ef007e]" />
+                    {/* Fee Pass-Through Card */}
+                    <div className="p-5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <ShieldCheck className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-sm font-bold text-emerald-950">
+                              Repassar Taxas ao Convidado (Receber 100% do Valor Definido)
+                            </p>
+                            <p className="text-xs text-emerald-800 mt-0.5 leading-relaxed">
+                              O Mercado Pago desconta uma tarifa em toda venda (Pix ~0,99% e Cartão ~4,98%). Com esta opção ativada, o sistema acrescenta a tarifa no checkout para que o valor líquido depositado na sua conta seja exatamente o preço do presente!
+                            </p>
+                          </div>
+                        </div>
+                        <label className="inline-flex items-center gap-2 cursor-pointer bg-white px-3.5 py-2 rounded-xl border border-emerald-300 shrink-0 shadow-2xs">
+                          <input
+                            type="checkbox"
+                            checked={paymentForm.passFeesToBuyer}
+                            onChange={e => setPaymentForm({ ...paymentForm, passFeesToBuyer: e.target.checked })}
+                            className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                          />
+                          <span className="text-xs font-bold text-emerald-900">
+                            {paymentForm.passFeesToBuyer ? 'Ativado' : 'Desativado'}
+                          </span>
+                        </label>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-[#96004b]">Checkout Pro Mercado Pago (Cartão e Pix)</p>
-                        <p className="text-sm text-[#d9006f] mt-1">
-                          Os convidados informam o próprio nome e e-mail no checkout para a emissão instantânea do Pix do Banco Central e comprovante seguro.
-                        </p>
-                      </div>
+
+                      {paymentForm.passFeesToBuyer && (
+                        <>
+                          <div className="grid sm:grid-cols-2 gap-4 pt-2 border-t border-emerald-200/70">
+                            <div>
+                              <label className="block text-xs font-semibold text-emerald-900 mb-1">
+                                Tarifa Pix Mercado Pago (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="25"
+                                value={paymentForm.pixFeePercent}
+                                onChange={e => setPaymentForm({ ...paymentForm, pixFeePercent: parseFloat(e.target.value) || 0 })}
+                                className="w-full px-3 py-2 border border-emerald-300 rounded-lg bg-white text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              />
+                              <p className="text-[11px] text-emerald-700 mt-1">Padrão Mercado Pago Brasil: 0,99%</p>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-emerald-900 mb-1">
+                                Tarifa Cartão na Hora (%)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="25"
+                                value={paymentForm.cardFeePercent}
+                                onChange={e => setPaymentForm({ ...paymentForm, cardFeePercent: parseFloat(e.target.value) || 0 })}
+                                className="w-full px-3 py-2 border border-emerald-300 rounded-lg bg-white text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                              />
+                              <p className="text-[11px] text-emerald-700 mt-1">Padrão na hora: 4,98% (ajuste se usar 14/30 dias)</p>
+                            </div>
+                          </div>
+
+                          {/* Live Simulation Preview */}
+                          {(() => {
+                            const simPix = calculateGrossAmount(100, paymentForm.pixFeePercent);
+                            const simCard = calculateGrossAmount(100, paymentForm.cardFeePercent);
+                            return (
+                              <div className="bg-white/90 rounded-lg p-3 border border-emerald-200 text-xs text-slate-700 space-y-1">
+                                <p className="font-semibold text-emerald-950">Simulação para um presente de R$ 100,00:</p>
+                                <p>
+                                  • No <strong>Pix MP</strong>: convidado paga <strong>R$ {simPix.grossAmount.toFixed(2)}</strong> → MP desconta {simPix.feePercent}% → você recebe <strong>R$ 100,00 líquidos</strong>.
+                                </p>
+                                <p>
+                                  • No <strong>Cartão à vista</strong>: convidado paga <strong>R$ {simCard.grossAmount.toFixed(2)}</strong> → MP desconta {simCard.feePercent}% → você recebe <strong>R$ 100,00 líquidos</strong>.
+                                </p>
+                                <p className="text-[11px] text-slate-500 pt-1">
+                                  Importante: No painel da sua conta Mercado Pago, mantenha a opção <em>"Parcelamento sem juros"</em> desativada para que os juros de parcelamento (2x a 12x) continuem sendo pagos pelo convidado.
+                                </p>
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
                     </div>
                     
                     <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg flex gap-3">
@@ -1437,8 +1560,7 @@ export default function AdminDashboard() {
                       <div className="text-xs text-amber-900 space-y-1.5">
                         <p className="font-semibold text-sm text-amber-950">Orientações para o Pix em Produção funcionar perfeitamente:</p>
                         <p>1. <strong>Chave Pix cadastrada:</strong> A sua conta Mercado Pago recebedora deve ter pelo menos uma chave Pix cadastrada no aplicativo do Mercado Pago.</p>
-                        <p>2. <strong>Autopagamento Proibido:</strong> O Mercado Pago impede que você pague a si mesmo. Se você estiver logado no Mercado Pago com a mesma conta que gerou o token, o Pix dá erro. Para testar, use uma aba anônima ou outro celular/conta de outra pessoa.</p>
-                        <p>3. <strong>E-mail real do comprador:</strong> O comprador deve digitar um e-mail real válido (ex: @gmail.com) no pop-up de presentes para que o Banco Central aprove a transação.</p>
+                        <p>2. <strong>Autopagamento Proibido:</strong> O Mercado Pago impede que você pague a si mesmo. Para testar, use uma aba anônima ou conta de outra pessoa.</p>
                       </div>
                     </div>
                   </div>
@@ -1451,7 +1573,7 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors">
+              <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg font-medium hover:bg-slate-800 transition-colors cursor-pointer">
                 Salvar Configurações de Pagamento
               </button>
             </form>

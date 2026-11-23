@@ -41,7 +41,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (paymentInfo) {
       const status = paymentInfo.status;
       const externalReference = paymentInfo.external_reference || '';
-      const amount = Number(paymentInfo.transaction_amount || 0);
+      const grossAmount = Math.round((Number(paymentInfo.transaction_amount || 0) + Number.EPSILON) * 100) / 100;
+      const mpNetReceived = Math.round((Number(paymentInfo.transaction_details?.net_received_amount || 0) + Number.EPSILON) * 100) / 100;
+      const netAmount = mpNetReceived > 0 ? mpNetReceived : grossAmount;
 
       let methodFriendly = 'PIX';
       if (paymentInfo.payment_method_id === 'pix') methodFriendly = 'PIX';
@@ -52,7 +54,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let targetHost = paymentInfo.metadata?.host_id || hostId;
       let giftId = paymentInfo.metadata?.gift_id || '';
       let donorName = paymentInfo.metadata?.donor_name || paymentInfo.payer?.first_name || 'Convidado';
-      let giftTitle = paymentInfo.additional_info?.items?.[0]?.title || paymentInfo.description || 'Presente';
+      let giftTitle = String(paymentInfo.additional_info?.items?.[0]?.title || paymentInfo.description || 'Presente')
+        .replace(/\s*\(inclui taxa de processamento\)$/i, '').trim();
 
       if (externalReference && externalReference.includes(':')) {
         const parts = externalReference.split(':');
@@ -78,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               gift_title: giftTitle,
               gift_id: giftId || null,
               donor_name: donorName,
-              amount: amount,
+              amount: netAmount,
               method: methodFriendly,
               status: 'approved',
               payment_id: String(paymentId),
@@ -89,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             await supabase.from('transactions').update({
               status: 'approved',
               method: methodFriendly,
-              amount,
+              amount: netAmount,
               payment_id: String(paymentId)
             }).eq('id', existing.id);
           }
@@ -109,7 +112,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: true,
         status: paymentInfo.status,
         method: methodFriendly,
-        amount: paymentInfo.transaction_amount,
+        amount: grossAmount,
+        netAmount,
         date: paymentInfo.date_approved || paymentInfo.date_created
       });
     }
