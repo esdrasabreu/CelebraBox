@@ -1,16 +1,8 @@
 @import "tailwindcss";
 
-@font-face {
-  font-family: 'Stylish Calligraphy Demo';
-  src: url('/fonts/stylish-calligraphy-demo.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
 @theme {
-  --font-serif: 'Stylish Calligraphy Demo', 'Great Vibes', 'Playfair Display', serif, cursive;
-  --font-calligraphy: 'Stylish Calligraphy Demo', 'Great Vibes', cursive;
+  --font-serif: 'Great Vibes', 'Playfair Display', serif, cursive;
+  --font-calligraphy: 'Great Vibes', cursive;
   --color-fuchsia-brand: #ef007e;
   --color-fuchsia-50: #fdf2f8;
   --color-fuchsia-100: #fce7f3;
@@ -26,11 +18,11 @@
 
 /* Calligraphy font helpers */
 .font-calligraphy {
-  font-family: 'Stylish Calligraphy Demo', 'Great Vibes', cursive;
+  font-family: 'Great Vibes', cursive;
 }
 
 .font-serif {
-  font-family: 'Stylish Calligraphy Demo', 'Great Vibes', 'Playfair Display', serif, cursive;
+  font-family: 'Great Vibes', 'Playfair Display', serif, cursive;
 }
 
 /* Fuchsia Brand Palette Helpers */

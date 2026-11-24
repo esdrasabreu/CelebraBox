@@ -226,6 +226,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
            }
         }
 
+        let sessionUserId: string | undefined;
+        let sessionJwt: string | undefined;
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          sessionUserId = session?.user?.id;
+          sessionJwt = session?.access_token;
+        } catch {}
+
+        const isAuthenticatedHost = Boolean(sessionUserId && sessionUserId === actualHostId);
+
         const [
           { data: eventData },
           { data: paymentData },
@@ -237,15 +247,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
           { data: scheduleData },
           { data: expData }
         ] = await Promise.all([
-          supabase.from('event_details').select('*').eq('host_id', actualHostId).single(),
-          supabase.from('payment_settings').select('*').eq('host_id', actualHostId).single(),
+          supabase.from('event_details').select('*').eq('host_id', actualHostId).maybeSingle(),
+          isAuthenticatedHost
+            ? supabase.from('payment_settings').select('*').eq('host_id', actualHostId).maybeSingle()
+            : Promise.resolve({ data: null }),
           supabase.from('gifts').select('*').eq('host_id', actualHostId),
           supabase.from('messages').select('*').eq('host_id', actualHostId),
           supabase.from('guests').select('*').eq('host_id', actualHostId),
-          supabase.from('transactions').select('*').eq('host_id', actualHostId),
+          isAuthenticatedHost
+            ? supabase.from('transactions').select('*').eq('host_id', actualHostId)
+            : Promise.resolve({ data: null }),
           supabase.from('gallery').select('*').eq('host_id', actualHostId),
           supabase.from('schedule').select('*').eq('host_id', actualHostId),
-          supabase.from('expenses').select('*').eq('host_id', actualHostId)
+          isAuthenticatedHost
+            ? supabase.from('expenses').select('*').eq('host_id', actualHostId)
+            : Promise.resolve({ data: null })
         ]);
 
         if (eventData) {
@@ -379,11 +395,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
         }
 
         setGuests(loadedGuests);
-        if (loadedGuests.length > 0) {
+        if (loadedGuests.length > 0 && isAuthenticatedHost) {
           // Sync with server store in background for public page availability across accounts
           fetch('/api/guests/sync', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(sessionJwt ? { Authorization: `Bearer ${sessionJwt}` } : {})
+            },
             body: JSON.stringify({ hostId: actualHostId, guests: loadedGuests })
           }).catch(() => {});
         }
@@ -404,11 +423,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode, hostId?: string 
 
         // Fetch from persistent server store (captures webhooks, Pix payments, reservations)
         try {
-          let accessJwt: string | undefined;
-          try {
-            const { data: { session } } = await supabase.auth.getSession();
-            accessJwt = session?.access_token;
-          } catch {}
+          const accessJwt = sessionJwt;
 
           const [txServerRes, resRes] = await Promise.all([
             fetch(`/api/transactions?hostId=${actualHostId}`, {
